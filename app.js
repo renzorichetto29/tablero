@@ -1369,12 +1369,46 @@ function MoneyInput({ value, onChange, ...rest }) {
     return React.createElement("input", { ref: ref, type: "text", inputMode: "decimal", autoComplete: "off", ...rest, value: txt, onChange: h, onKeyDown: kd });
 }
 /* ---------- editar un registro cargado desde el dashboard ---------- */
+const defCta = (fp, L) => {
+    if (fp === TC || !L.length)
+        return '';
+    let s = '';
+    try {
+        s = localStorage.getItem('ruma_cta_' + fp) || '';
+    }
+    catch (e) { }
+    if (s !== 'none' && !L.some(x => x.id === s)) {
+        const m = L.find(x => new RegExp(fp === 'Efectivo' ? 'efectivo' : 'bbva', 'i').test(x.n));
+        s = m ? m.id : '';
+    }
+    return s;
+};
 function EditReg({ r, movs, onEdit, onClose, onDone }) {
+    const { ctas } = React.useContext(CajaCtx), ars = ctas.filter(c => c.mon === 'ARS');
     const isIng = r.t === 'ing', lk = movs.filter(m => m.rid === r.id).sort((a, b) => a.f < b.f ? -1 : a.f > b.f ? 1 : String(a.fc || '') < String(b.fc || '') ? -1 : 1);
     const pg0 = Array.isArray(r.pagos) && r.pagos.length ? r.pagos : (r.st === 'pagado' ? [{ f: r.f, m: r.mt, fp: r.fp, cu: r.cu }] : []);
-    const [v, sV] = useState(isIng ? { y: r.y, mes: r.mes, p: r.p, mt: String(r.mt) } : { t: r.t, p: r.p || '', c: r.c || '', mt: String(r.mt), o: r.o || '', pagos: pg0.map(x => ({ f: x.f, m: String(x.m), fp: x.fp && x.fp !== 'Sin dato' ? x.fp : 'Efectivo', cu: x.cu || 1 })), due: r.st === 'agendado' ? r.f : (r.fv || ''), fp: r.fp && r.fp !== 'Sin dato' ? r.fp : 'Efectivo', cu: r.cu || 1 });
+    const [v, sV] = useState(isIng ? { y: r.y, mes: r.mes, p: r.p, mt: String(r.mt) } : { t: r.t, p: r.p || '', c: r.c || '', mt: String(r.mt), o: r.o || '', pagos: pg0.map(x => ({ f: x.f, m: String(x.m), fp: x.fp && x.fp !== 'Sin dato' ? x.fp : 'Efectivo', cu: x.cu || 1, o: 1, cj: 'none' })), due: r.st === 'agendado' ? r.f : (r.fv || ''), fp: r.fp && r.fp !== 'Sin dato' ? r.fp : 'Efectivo', cu: r.cu || 1 });
     const [busy, sB] = useState(false), [er, sEr] = useState('');
     const set = (k, x) => sV(s => ({ ...s, [k]: x }));
+    // empareja cada pago (que no es con tarjeta) con su movimiento de Caja: primero por fecha y monto iguales, después por uno de los dos
+    const plan = pagos => {
+        const used = new Set(), pr = {};
+        pagos.forEach((x, i) => { if (x.fp === TC)
+            return; const m = lk.find(k => !used.has(k.id) && k.f === x.f && Math.abs(+k.mt - (+x.m || 0)) < 0.5); if (m) {
+            used.add(m.id);
+            pr[i] = m;
+        } });
+        const free = () => pagos.map((x, i) => i).filter(i => pagos[i].fp !== TC && pagos[i].o && !pr[i]);
+        lk.filter(m => !used.has(m.id)).forEach(m => { const c = free().filter(i => pagos[i].f === m.f || Math.abs((+pagos[i].m || 0) - (+m.mt)) < 0.5); if (c.length === 1) {
+            pr[c[0]] = m;
+            used.add(m.id);
+        } });
+        const rm = lk.filter(m => !used.has(m.id)), fr = free();
+        if (rm.length === 1 && fr.length === 1) {
+            pr[fr[0]] = rm[0];
+        }
+        return pr;
+    };
     const L = (l, c) => React.createElement("label", { className: "text-sm" },
         React.createElement("span", { className: "mut block mb-1" }, l),
         c);
@@ -1427,20 +1461,38 @@ function EditReg({ r, movs, onEdit, onClose, onDone }) {
             const c0 = { ...base, f: srt[0].f, pg: sp, fp: srt[0].fp, cu: srt[0].cu };
             patch = sp >= tot - 0.5 ? { ...c0, e: 'OK', st: 'pagado', pagos: srt.length > 1 ? srt : null, fv: null } : { ...c0, e: 'EN PROCESO', st: 'parcial', pagos: srt, fv: v.due || null };
         }
-        const np = srt.filter(x => x.fp !== TC), mu = [];
-        let note = 'Cambios guardados.';
-        if (lk.length) {
-            if (lk.length === np.length)
-                np.forEach((x, i) => { const d = ((patch.p || '') + (patch.c ? ' · ' + patch.c : '')) || null; if (lk[i].f !== x.f || +lk[i].mt !== x.m || (lk[i].d || null) !== d)
-                    mu.push([lk[i].id, { f: x.f, mt: x.m, d }]); });
-            if (lk.length === np.length)
-                note += mu.length ? ' También actualicé ' + mu.length + (mu.length === 1 ? ' movimiento' : ' movimientos') + ' de Caja.' : '';
-            else
-                note += ' Ojo: este pago tiene ' + lk.length + (lk.length === 1 ? ' movimiento' : ' movimientos') + ' en Caja y no coincide con los pagos editados. Los movimientos de Caja no se modificaron: corregilos o eliminalos desde Caja.';
+        const pr = plan(v.pagos), mu = [], mc = [], d = ((patch.p || '') + (patch.c ? ' · ' + patch.c : '')) || null;
+        for (let i = 0; i < v.pagos.length; i++) {
+            const x = v.pagos[i];
+            if (x.fp !== TC && !pr[i] && !x.o && ars.length && x.cj === '') {
+                sEr('Elegí de qué cuenta de Caja sale el pago del ' + dmy(x.f) + ' (o "No registrar en Caja").');
+                return;
+            }
         }
+        v.pagos.forEach((x, i) => {
+            if (x.fp === TC)
+                return;
+            const m = pr[i], mt = +x.m || 0;
+            if (m) {
+                if (m.f !== x.f || +m.mt !== mt || (m.d || null) !== d)
+                    mu.push([m.id, { f: x.f, mt, d }]);
+            }
+            else if (ars.length && x.cj && x.cj !== 'none')
+                mc.push({ cta: x.cj, mt, f: x.f });
+        });
+        const paired = new Set(Object.values(pr).map(m => m.id)), orf = lk.filter(m => !paired.has(m.id));
+        let note = 'Cambios guardados.';
+        if (mc.length)
+            note += ' Registré ' + mc.length + (mc.length === 1 ? ' movimiento nuevo' : ' movimientos nuevos') + ' en Caja.';
+        if (mu.length)
+            note += ' Actualicé ' + mu.length + (mu.length === 1 ? ' movimiento' : ' movimientos') + ' de Caja.';
+        if (orf.length)
+            note += ' Ojo: quedaron ' + orf.length + (orf.length === 1 ? ' movimiento' : ' movimientos') + ' en Caja que ya no coinciden con ningún pago: revisalos desde Caja.';
         sB(true);
         try {
-            await onEdit(r.id, patch, mu);
+            await onEdit(r.id, patch, mu, mc);
+            v.pagos.forEach(x => { if (x.fp !== TC && x.cj && x.cj !== 'none')
+                rememberCta(x.fp, x.cj); });
             onDone(note);
         }
         catch (e) {
@@ -1448,7 +1500,7 @@ function EditReg({ r, movs, onEdit, onClose, onDone }) {
             sB(false);
         }
     };
-    const sp = isIng ? 0 : sum(v.pagos, x => +x.m || 0), tot = +v.mt || 0, rem = Math.max(0, tot - sp);
+    const sp = isIng ? 0 : sum(v.pagos, x => +x.m || 0), tot = +v.mt || 0, rem = Math.max(0, tot - sp), pr = isIng ? {} : plan(v.pagos);
     const setP = (i, k, x) => sV(s => ({ ...s, pagos: s.pagos.map((q, j) => j === i ? { ...q, [k]: x } : q) }));
     if (isIng)
         return React.createElement("div", { className: "space-y-3" },
@@ -1475,14 +1527,23 @@ function EditReg({ r, movs, onEdit, onClose, onDone }) {
             L('Observación', React.createElement("input", { className: "inp", value: v.o, onChange: e => set('o', e.target.value) }))),
         React.createElement("div", { className: "text-sm font-semibold" }, "Pagos realizados"),
         !v.pagos.length && React.createElement("div", { className: "text-sm mut" }, "Todav\u00EDa no se pag\u00F3 nada: es un pago agendado."),
-        v.pagos.map((q, i) => React.createElement("div", { key: i, className: "flex flex-wrap items-end gap-3" },
-            L('Fecha', React.createElement("input", { className: "inp", type: "date", value: q.f, onChange: e => setP(i, 'f', e.target.value) })),
-            L('Monto ($)', React.createElement(MoneyInput, { className: "inp", style: { width: 170 }, value: q.m, onChange: x => setP(i, 'm', x) })),
-            L('Forma de pago', React.createElement("select", { className: "inp", value: q.fp, onChange: e => setP(i, 'fp', e.target.value) }, FP.map(o => React.createElement("option", { key: o }, o)))),
-            q.fp === TC && L('Cuotas', React.createElement("select", { className: "inp", value: q.cu, onChange: e => setP(i, 'cu', e.target.value) }, CUOTAS.map(o => React.createElement("option", { key: o, value: o }, o === 1 ? '1 (un pago)' : o + ' cuotas')))),
-            React.createElement("button", { className: "btn", onClick: () => sV(s => ({ ...s, pagos: s.pagos.filter((_, j) => j !== i) })) }, "Quitar pago"))),
+        v.pagos.map((q, i) => {
+            const mv = pr[i], libre = q.fp !== TC && !mv;
+            return React.createElement("div", { key: i, className: "flex flex-wrap items-end gap-3" },
+                L('Fecha', React.createElement("input", { className: "inp", type: "date", value: q.f, onChange: e => setP(i, 'f', e.target.value) })),
+                L('Monto ($)', React.createElement(MoneyInput, { className: "inp", style: { width: 170 }, value: q.m, onChange: x => setP(i, 'm', x) })),
+                L('Forma de pago', React.createElement("select", { className: "inp", value: q.fp, onChange: e => { const f = e.target.value; sV(s => ({ ...s, pagos: s.pagos.map((z, j) => j === i ? { ...z, fp: f, ...(z.o ? {} : { cj: defCta(f, ars) }) } : z) })); } }, FP.map(o => React.createElement("option", { key: o }, o)))),
+                q.fp === TC && L('Cuotas', React.createElement("select", { className: "inp", value: q.cu, onChange: e => setP(i, 'cu', e.target.value) }, CUOTAS.map(o => React.createElement("option", { key: o, value: o }, o === 1 ? '1 (un pago)' : o + ' cuotas')))),
+                libre && ars.length > 0 && L(q.o ? 'Caja: ¿de qué cuenta salió?' : 'Caja: ¿de qué cuenta sale?', React.createElement("select", { className: "inp", value: q.cj, onChange: e => setP(i, 'cj', e.target.value) },
+                    React.createElement("option", { value: "" }, "Eleg\u00ED la cuenta\u2026"),
+                    React.createElement("option", { value: "none" }, "No registrar en Caja"),
+                    ars.map(x => React.createElement("option", { key: x.id, value: x.id }, x.n)))),
+                mv && React.createElement("span", { className: "text-xs mut", style: { paddingBottom: 10 } }, "Registrado en Caja"),
+                q.fp === TC && React.createElement("span", { className: "text-xs mut", style: { paddingBottom: 10 } }, "Con tarjeta no sale de Caja hasta pagar el resumen"),
+                React.createElement("button", { className: "btn", onClick: () => sV(s => ({ ...s, pagos: s.pagos.filter((_, j) => j !== i) })) }, "Quitar pago"));
+        }),
         React.createElement("div", null,
-            React.createElement("button", { className: "btn", onClick: () => sV(s => ({ ...s, pagos: [...s.pagos, { f: hoy(), m: rem > 0 ? String(Math.round(rem * 100) / 100) : '', fp: 'Efectivo', cu: 1 }] })) },
+            React.createElement("button", { className: "btn", onClick: () => sV(s => ({ ...s, pagos: [...s.pagos, { f: hoy(), m: rem > 0 ? String(Math.round(rem * 100) / 100) : '', fp: 'Efectivo', cu: 1, o: 0, cj: defCta('Efectivo', ars) }] })) },
                 React.createElement(Icon, { n: "plus", s: 16 }),
                 "Agregar pago")),
         !v.pagos.length && React.createElement("div", { className: "flex flex-wrap items-end gap-3" },
@@ -1499,12 +1560,7 @@ function EditReg({ r, movs, onEdit, onClose, onDone }) {
             "Estado resultante: ",
             React.createElement("b", null, !v.pagos.length ? 'Agendado' : sp >= tot - 0.5 ? 'Pagado' : 'En proceso'),
             v.pagos.length > 0 ? ' · pagado ' + $(sp) + ' de ' + $(tot) : ''),
-        lk.length > 0 && React.createElement("div", { className: "text-xs mut" },
-            "Este pago tiene ",
-            lk.length,
-            " ",
-            lk.length === 1 ? 'movimiento' : 'movimientos',
-            " en Caja. Si la cantidad de pagos en efectivo o transferencia no cambia, los actualizo con las nuevas fechas y montos."),
+        ars.length > 0 && React.createElement("div", { className: "text-xs mut" }, "Caja: los pagos en efectivo o transferencia que ya figuran como movimiento se actualizan con la nueva fecha y monto. Los que no tienen movimiento muestran un selector de cuenta: si eleg\u00EDs una, se registra el egreso y se descuenta de esa cuenta."),
         React.createElement("div", { className: "flex flex-wrap items-center gap-3" },
             React.createElement("button", { className: "btn p", disabled: busy, onClick: save }, "Guardar cambios"),
             React.createElement("button", { className: "btn", onClick: onClose }, "Cancelar"),
@@ -2791,8 +2847,9 @@ function App() {
         await CJ.add(mkMov(cj, rec, id)); return id; };
     const upd = async (id, p, cj) => { await R.upd(id, p); if (cj)
         await CJ.add(mkMov(cj, R.items.find(x => x.id === id) || {}, id)); };
-    const editReg = async (id, patch, mu) => { await R.upd(id, patch); for (const [mid, pp] of mu)
-        await CJ.upd(mid, pp); };
+    const editReg = async (id, patch, mu, mc) => { await R.upd(id, patch); for (const [mid, pp] of mu)
+        await CJ.upd(mid, pp); for (const cj of (mc || []))
+        await CJ.add(mkMov(cj, { ...(R.items.find(x => x.id === id) || {}), ...patch }, id)); };
     const del = async (id) => { await R.del(id); for (const m of CJ.items.filter(x => x.rid === id))
         await CJ.del(m.id); };
     const cv = { ctas: CT.items.filter(x => x.k === 'cta' && x.act !== false) };
