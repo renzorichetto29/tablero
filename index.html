@@ -108,12 +108,29 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);font-size:13.5px;white-s
 
   /* ---------- comunicación con Apps Script ---------- */
   function fail(code, msg) { var e = new Error(msg); e.code = code; return e; }
-  async function api(body) {
+  // Todo viaja con GET: Google redirige los POST y algunos navegadores los rechazan (error 405).
+  // Los pedidos grandes se comprimen y se mandan en pedazos; el servidor los vuelve a armar.
+  var CH = 1800;
+  function b64(u8) {
+    var s = '', i = 0, N = 0x8000;
+    for (; i < u8.length; i += N) s += String.fromCharCode.apply(null, u8.subarray(i, i + N));
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_');
+  }
+  async function pack(obj) {
+    var bytes = new TextEncoder().encode(JSON.stringify(obj)), z = 0;
+    if (bytes.length > 1200 && window.CompressionStream) {
+      try {
+        var gz = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+        if (gz.length < bytes.length) { bytes = gz; z = 1; }
+      } catch (e) { /* sin compresión */ }
+    }
+    return { p: b64(bytes), z: z };
+  }
+  async function call(params) {
+    var url = API + (API.indexOf('?') < 0 ? '?' : '&') + Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
     var res;
-    try {
-      res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
-    } catch (e) {
-      throw fail('red', 'No se pudo conectar. Revisá tu conexión a internet.');
+    try { res = await fetch(url); } catch (e) {
+      throw fail('red', 'No se pudo conectar con el servidor. Revisá tu conexión a internet y que la implementación de Apps Script esté en acceso "Cualquier usuario".');
     }
     var j;
     try { j = await res.json(); } catch (e) {
@@ -121,6 +138,19 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);font-size:13.5px;white-s
     }
     if (!j.ok) throw fail(j.code || 'error', j.error || 'Error desconocido');
     return j;
+  }
+  async function api(body, intento) {
+    var e = await pack(body);
+    if (e.p.length <= CH) return call({ p: e.p, z: e.z });
+    var id = Math.random().toString(36).slice(2, 12) + 'x', n = Math.ceil(e.p.length / CH), next = 0;
+    async function worker() { while (next < n) { var i = next++; await call({ a: 'chunk', id: id, i: i, n: n, d: e.p.slice(i * CH, (i + 1) * CH) }); } }
+    try {
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      return await call({ a: 'commit', id: id, n: n, z: e.z });
+    } catch (err) {
+      if (err.code === 'incompleto' && !intento) return api(body, 1);
+      throw err;
+    }
   }
   function saveSess(s) { try { localStorage.setItem(LS, JSON.stringify(s)); } catch (e) {} }
   function loadSess() { try { return JSON.parse(localStorage.getItem(LS)); } catch (e) { return null; } }
