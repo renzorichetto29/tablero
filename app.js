@@ -2838,9 +2838,500 @@ function VentasTodo() {
             React.createElement(Donut, { items: [{ name: 'DUX (pedidos)', value: A }, ...by(T, 'ca', r => r.n)] })),
         React.createElement("p", { className: "text-xs mut" }, "DUX: total de los comprobantes, todo cobrado. Tienda Nube y local: neto de descuentos y sin env\u00EDo. Tienda Nube y local empieza en marzo 2026."));
 }
+/* ================= FINANZAS ================= */
+const FZ_DEF = { mkt: 'MDE, NANO MDE, META', dueno: 'RENZO', win: 6, xa: true, mg: '', fj: '' };
+const FZ_L = { MERC: 'Mercadería', FLETES: 'Fletes y transporte', MKT: 'Marketing (agencia y pauta)', DUENO: 'Sueldo y retiros del dueño', 'G:SUELDOS': 'Sueldos del personal', 'G:HONORARIOS': 'Honorarios (sin marketing)', 'G:ALQUILERES': 'Alquileres', 'G:SERVICIOS': 'Servicios', 'G:IMPUESTOS': 'Impuestos y cargas', 'G:COMISIONES': 'Comisiones', 'G:MANTENIMIENTO': 'Mantenimiento', 'G:RETIRO EXTRAORDINARIO': 'Otros retiros' };
+const FZ_P = { DUX: 'DUX (pedidos y sillones)', PDV: 'PDV (local)', 'TIENDA NUBE': 'Tienda Nube (web)' };
+const fzM = n => $M(Math.abs(n) >= 999500 && Math.abs(n) < 1e6 ? (n < 0 ? -1e6 : 1e6) : n);
+const fzL = g => FZ_L[g] || cap(String(g).replace(/^G:/, ''));
+const fzList = s => String(s || '').split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
+const fzPct = (v, d = 1) => (typeof v === 'number' && isFinite(v) ? (v * 100).toFixed(d).replace('.', ',') + ' %' : '–');
+const fzKey = r => ym(r.y, r.mes);
+const fzIsOp = n => n === 'MKT' || n.startsWith('G:');
+
+/* Pagos de una salida: cada pago cuenta en el mes en que se hizo (base "pagado") o el total en el mes de la salida (base "mt") */
+const fzEv = (r, bs) => {
+    const k = fzKey(r);
+    if (bs === 'mt')
+        return [{ k, m: +r.mt || 0 }];
+    const pk = q => q && q.f ? ymOf(q.f) : k;
+    if (r.xo && Array.isArray(r.xo.pagos)) {
+        const ex = sum(r.xo.pagos, q => q.m);
+        return [{ k, m: (+r.pg || 0) - ex }, ...r.xo.pagos.map(q => ({ k: pk(q), m: +q.m || 0 }))];
+    }
+    if (r.nuevo && Array.isArray(r.pagos) && r.pagos.length)
+        return r.pagos.map(q => ({ k: pk(q), m: +q.m || 0 }));
+    return [{ k, m: +r.pg || 0 }];
+};
+const fzEgr = (D, bs) => { const o = []; [['merc', D.merc], ['serv', D.serv]].forEach(([t, a]) => a.forEach(r => fzEv(r, bs).forEach(e => { if (e.m)
+    o.push({ k: e.k, t, c: String(r.c || '').toUpperCase(), p: String(r.p || '').toUpperCase(), m: e.m }); }))); return o; };
+const fzGrp = (e, mk, own) => e.t === 'merc' ? (e.c === 'TRANSPORTE' ? 'FLETES' : 'MERC') : (/^(SUELDOS|RETIRO)/.test(e.c) && own.includes(e.p)) ? 'DUENO' : mk.includes(e.p) ? 'MKT' : 'G:' + e.c;
+function fzModel(D, cv, bs) {
+    const mk = fzList(cv.mkt), own = fzList(cv.dueno), M = {};
+    const mo = k => M[k] || (M[k] = { ven: {}, xa: 0, g: {}, ps: new Set() });
+    D.ing.forEach(r => { const o = mo(fzKey(r)); o.ps.add(r.p); if (r.p === 'XA')
+        o.xa += +r.mt || 0;
+    else
+        o.ven[r.p] = (o.ven[r.p] || 0) + (+r.mt || 0); });
+    fzEgr(D, bs).forEach(e => { const o = mo(e.k), g = fzGrp(e, mk, own); o.g[g] = (o.g[g] || 0) + e.m; });
+    const ks = Object.keys(M).map(Number), keys = [];
+    if (ks.length) {
+        let k = Math.min(...ks);
+        const b = Math.max(...ks);
+        while (k <= b) {
+            keys.push(k);
+            k = addM(k, 1);
+        }
+    }
+    keys.forEach(k => {
+        const o = mo(k);
+        o.ventas = sum(Object.values(o.ven), x => x);
+        o.merc = o.g.MERC || 0;
+        o.fle = o.g.FLETES || 0;
+        o.costo = o.merc + o.fle;
+        o.dueno = o.g.DUENO || 0;
+        o.mkt = o.g.MKT || 0;
+        o.gop = sum(Object.entries(o.g).filter(([n]) => fzIsOp(n)), ([, v]) => v);
+        o.bruto = o.ventas - o.costo;
+        o.op = o.bruto - o.gop + o.xa;
+        o.fin = o.op - o.dueno;
+        o.complete = o.ventas > 0;
+    });
+    return { M, keys };
+}
+const fzSum = (M, ms) => {
+    const t = { ven: 0, xa: 0, costo: 0, merc: 0, fle: 0, gop: 0, dueno: 0, mkt: 0, g: {} };
+    ms.forEach(k => { const o = M[k]; if (!o)
+        return; t.ven += o.ventas; t.xa += o.xa; t.costo += o.costo; t.merc += o.merc; t.fle += o.fle; t.gop += o.gop; t.dueno += o.dueno; t.mkt += o.mkt; Object.entries(o.g).forEach(([n, v]) => t.g[n] = (t.g[n] || 0) + v); });
+    t.bruto = t.ven - t.costo;
+    t.op = t.bruto - t.gop + t.xa;
+    t.fin = t.op - t.dueno;
+    return t;
+};
+/* Punto de equilibrio: margen y gastos fijos calculados con los últimos N meses cerrados (o los valores manuales) */
+function fzBE(model, cv, HK) {
+    const { M, keys } = model, n = +cv.win || 6;
+    const cl = keys.filter(k => k < HK && M[k].complete && M[k].ventas > 0).slice(-n);
+    const V = sum(cl, k => M[k].ventas), C = sum(cl, k => M[k].costo), mgC = V > 0 ? (V - C) / V : 0;
+    const g = {};
+    cl.forEach(k => Object.entries(M[k].g).forEach(([nm, v]) => { if (nm === 'DUENO' || fzIsOp(nm))
+        g[nm] = (g[nm] || 0) + v; }));
+    const xaA = cl.length ? sum(cl, k => M[k].xa) / cl.length : 0, fjG = cl.length ? sum(Object.values(g), x => x) / cl.length : 0, fjC = fjG - (cv.xa ? xaA : 0);
+    const manMg = cv.mg !== '' && cv.mg != null && isFinite(+cv.mg), manFj = cv.fj !== '' && cv.fj != null && isFinite(+cv.fj);
+    const mg = manMg ? (+cv.mg) / 100 : mgC, fj = manFj ? +cv.fj : fjC;
+    return { cl, V, avg: cl.length ? V / cl.length : 0, mgC, mg, g, xaA, fjG, fjC, fj, manMg, manFj, pe: mg > 0 ? fj / mg : null };
+}
+/* Supuestos guardados en la planilla (colección "config") */
+function useFzCfg(CF) {
+    const it = CF.items.find(x => x.k === 'fin');
+    const [loc, sLoc] = useState({}), [err, sErr] = useState('');
+    const tm = React.useRef(null), idr = React.useRef(null), pend = React.useRef({}), busy = React.useRef(false), cfr = React.useRef(CF);
+    cfr.current = CF;
+    if (it)
+        idr.current = it.id;
+    const flush = async () => {
+        if (busy.current) {
+            tm.current = setTimeout(flush, 500);
+            return;
+        }
+        const p = pend.current;
+        pend.current = {};
+        if (!Object.keys(p).length)
+            return;
+        busy.current = true;
+        try {
+            if (idr.current)
+                await cfr.current.upd(idr.current, p);
+            else
+                idr.current = await cfr.current.add({ k: 'fin', ...p });
+            sErr('');
+        }
+        catch (e) {
+            pend.current = { ...p, ...pend.current };
+            sErr('No se pudo guardar en la planilla (' + ((e && e.message) || 'error') + '). Si recién actualizaste el tablero, falta actualizar el código de Apps Script.');
+        }
+        busy.current = false;
+    };
+    const set = p => { sLoc(o => ({ ...o, ...p })); pend.current = { ...pend.current, ...p }; clearTimeout(tm.current); tm.current = setTimeout(flush, 700); };
+    const v = useMemo(() => ({ ...FZ_DEF, ...(it || {}), ...loc }), [it, loc]);
+    return { v, set, err };
+}
+const FzTd = ({ v, b, c, p, i }) => React.createElement("td", { className: "num text-right", style: { color: c || (!p && v < 0 ? 'var(--r)' : undefined), fontWeight: b ? 700 : 400, fontStyle: i ? 'italic' : undefined } }, p ? fzPct(v) : v ? $(v) : '–');
+const FzTip = ({ children }) => React.createElement("p", { className: "text-xs mut" }, children);
+function FzSupuestos({ cf, be, part }) {
+    const v = cf.v, s = cf.set;
+    const cls = React.createElement("div", { className: "flex flex-wrap gap-4 items-end" },
+        React.createElement(Ctl, { l: "Proveedores que cuentan como marketing (separados por coma)" },
+            React.createElement("input", { className: "inp", style: { width: 300 }, value: v.mkt, onChange: e => s({ mkt: e.target.value }) })),
+        React.createElement(Ctl, { l: "Proveedor que es el sueldo del dueño (sueldos y retiros)" },
+            React.createElement("input", { className: "inp", style: { width: 220 }, value: v.dueno, onChange: e => s({ dueno: e.target.value }) })));
+    const bePart = be && React.createElement("div", { className: "flex flex-wrap gap-4 items-end" },
+        React.createElement(Ctl, { l: "Meses cerrados para calcular" },
+            React.createElement(Seg, { v: +v.win || 6, set: x => s({ win: x }), opts: [[3, '3 meses'], [6, '6 meses'], [12, '12 meses']] })),
+        React.createElement(Ctl, { l: "Margen bruto manual (%)" },
+            React.createElement("span", { className: "flex gap-2" },
+                React.createElement("input", { className: "inp", style: { width: 120 }, type: "number", placeholder: (be.mgC * 100).toFixed(1), value: v.mg, onChange: e => s({ mg: e.target.value }) }),
+                v.mg !== '' && React.createElement("button", { className: "btn", onClick: () => s({ mg: '' }) }, "Usar calculado"))),
+        React.createElement(Ctl, { l: "Gastos fijos por mes manuales ($)" },
+            React.createElement("span", { className: "flex gap-2" },
+                React.createElement(MoneyInput, { className: "inp", style: { width: 170 }, placeholder: fmtMoney(String(Math.round(be.fjC))), value: v.fj === '' || v.fj == null ? '' : String(v.fj), onChange: x => s({ fj: x }) }),
+                v.fj !== '' && v.fj != null && React.createElement("button", { className: "btn", onClick: () => s({ fj: '' }) }, "Usar calculado"))),
+        React.createElement("label", { className: "text-sm flex items-center gap-2", style: { paddingBottom: 8 } },
+            React.createElement("input", { type: "checkbox", checked: !!v.xa, onChange: e => s({ xa: e.target.checked }) }),
+            "Descontar lo que cobro de XA (alquiler del galp\u00F3n) de los gastos fijos"));
+    return React.createElement("section", { className: "card p-4 space-y-3" },
+        React.createElement("div", { className: "flex flex-wrap justify-between gap-2" },
+            React.createElement("h3", { className: "font-semibold", style: { fontSize: 15 } }, "Supuestos editables"),
+            cf.err ? React.createElement("span", { className: "text-xs", style: { color: 'var(--r)' } }, cf.err) : React.createElement("span", { className: "text-xs mut" }, "Se guardan en la planilla y valen para todos los usuarios.")),
+        cls,
+        bePart);
+}
+/* ---------- selector de período compartido ---------- */
+function FzRango({ keys, lastV, from, to, sF, sT, bs, sBs, noBase }) {
+    const last = lastV, yk = ym(new Date().getFullYear(), 1);
+    const pre = [['Este año', Math.max(keys[0], yk), last], ['Año pasado', ym(new Date().getFullYear() - 1, 1), ym(new Date().getFullYear() - 1, 12)], ['Últimos 12 meses', keys[Math.max(0, keys.length - 12)], last], ['Todo', keys[0], last]].map(([l, a, z]) => [l, Math.max(a, keys[0]), Math.min(z, last)]).filter(([l, a, z]) => a <= z);
+    return React.createElement("section", { className: "card p-4 space-y-3" },
+        React.createElement("div", { className: "flex flex-wrap gap-2" }, pre.map(([l, a, z]) => React.createElement("button", { key: l, className: 'btn ' + (from === a && to === z ? 'p' : ''), onClick: () => { sF(a); sT(z); } }, l))),
+        React.createElement("div", { className: "flex flex-wrap gap-4 items-end" },
+            React.createElement(MonthSel, { keys: keys, from: from, to: to, sF: sF, sT: sT }),
+            !noBase && React.createElement(Ctl, { l: "Egresos" },
+                React.createElement(Seg, { v: bs, set: sBs, opts: [['pg', 'Lo pagado en el mes'], ['mt', 'Monto total del mes']] }))));
+}
+/* ---------- estado de resultados ---------- */
+function EstadoResultados({ model, ms, bs, cf, be, HK }) {
+    const { M } = model, T = fzSum(M, ms);
+    const plats = useMemo(() => { const s = {}; ms.forEach(k => Object.entries(M[k].ven).forEach(([p, v]) => s[p] = (s[p] || 0) + v)); return Object.keys(s).sort((a, b) => s[b] - s[a]); }, [M, ms]);
+    const gnames = useMemo(() => { const s = {}; ms.forEach(k => Object.entries(M[k].g).forEach(([n, v]) => { if (fzIsOp(n))
+        s[n] = (s[n] || 0) + v; })); return Object.keys(s).filter(n => Math.abs(s[n]) > 0.5).sort((a, b) => (a === 'MKT' ? -1 : b === 'MKT' ? 1 : s[b] - s[a])); }, [M, ms]);
+    let a = 0;
+    const ACC = ms.map(k => a += M[k].fin);
+    const flag = k => k === HK ? 'mes en curso' : M[k].ventas === 0 ? 'sin ingresos cargados' : '';
+    const flagged = ms.filter(k => flag(k));
+    const row = (key, label, f, tot, o = {}) => React.createElement("tr", { key: key },
+        React.createElement("td", { style: { position: 'sticky', left: 0, background: o.bg || 'var(--card)', fontWeight: o.b ? 700 : 400, paddingLeft: o.ind ? 22 : 10, color: o.c, fontStyle: o.i ? 'italic' : undefined } }, label),
+        ms.map(k => React.createElement(FzTd, { key: k, v: f(M[k], k), b: o.b, c: o.c, p: o.p, i: o.i })),
+        React.createElement(FzTd, { v: tot, b: true, c: o.c, p: o.p, i: o.i }));
+    const sec = (l, c) => React.createElement("tr", { key: 's' + l },
+        React.createElement("td", { colSpan: ms.length + 2, style: { fontWeight: 700, color: c, background: 'var(--bg)' } }, l));
+    const BG = 'var(--bg)';
+    const pv = (x, y) => y > 0 ? x / y : NaN;
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))' } },
+            React.createElement(Kpi, { l: "Ventas del per\u00EDodo", v: fzM(T.ven), c: "var(--g)", s: ms.length + ' meses · sin XA' }),
+            React.createElement(Kpi, { l: "Margen bruto", v: fzPct(pv(T.bruto, T.ven)), c: "var(--b)", s: fzM(T.bruto) + ' sobre el precio de venta' }),
+            React.createElement(Kpi, { l: "Resultado operativo", v: fzM(T.op), c: T.op < 0 ? 'var(--r)' : 'var(--b)', s: fzPct(pv(T.op, T.ven)) + ' de las ventas, antes del sueldo del due\u00F1o' }),
+            React.createElement(Kpi, { l: "Resultado final", v: fzM(T.fin), c: T.fin < 0 ? 'var(--r)' : 'var(--g)', s: 'Despu\u00E9s del sueldo del due\u00F1o · ' + fzM(ms.length ? T.fin / ms.length : 0) + ' por mes' })),
+        React.createElement(Card, { t: "Resultado mes a mes" },
+            React.createElement(GBars, { labels: ms.map(lab), series: [{ name: 'Resultado operativo', color: 'var(--b)', vals: ms.map(k => M[k].op) }, { name: 'Resultado final', color: 'var(--g)', vals: ms.map(k => M[k].fin) }], line: ACC, lineName: 'Acumulado', lineColor: 'var(--o)' })),
+        React.createElement("section", { className: "card" },
+            React.createElement("div", { className: "overflow-x-auto", style: { maxHeight: 640 } },
+                React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
+                    React.createElement("thead", null,
+                        React.createElement("tr", null,
+                            React.createElement("th", { style: { left: 0, zIndex: 2 } }, "Concepto"),
+                            ms.map(k => React.createElement("th", { key: k, className: "text-right", title: flag(k) }, lab(k) + (flag(k) ? ' *' : ''))),
+                            React.createElement("th", { className: "text-right" }, "Total"))),
+                    React.createElement("tbody", null,
+                        sec('Ventas (sin XA)', 'var(--g)'),
+                        plats.map(p => row('v' + p, FZ_P[p] || cap(p), o => o.ven[p] || 0, sum(ms, k => M[k].ven[p] || 0), { ind: 1 })),
+                        row('tv', 'Total ventas', o => o.ventas, T.ven, { b: 1, c: 'var(--g)', bg: BG }),
+                        sec('Costo de ventas', 'var(--o)'),
+                        row('cm', 'Mercadería', o => o.merc, T.merc, { ind: 1 }),
+                        row('cf', 'Fletes y transporte', o => o.fle, T.fle, { ind: 1 }),
+                        row('tc', 'Total costo de ventas', o => o.costo, T.costo, { b: 1, c: 'var(--o)', bg: BG }),
+                        row('rb', 'Resultado bruto', o => o.bruto, T.bruto, { b: 1, c: 'var(--b)', bg: BG }),
+                        row('mb', 'Margen bruto (% de ventas)', o => pv(o.bruto, o.ventas), pv(T.bruto, T.ven), { p: 1, i: 1, ind: 1 }),
+                        sec('Gastos operativos', 'var(--o)'),
+                        gnames.map(n => row('g' + n, fzL(n), o => o.g[n] || 0, T.g[n] || 0, { ind: 1 })),
+                        row('tg', 'Total gastos operativos', o => o.gop, T.gop, { b: 1, c: 'var(--o)', bg: BG }),
+                        row('xa', 'Otros ingresos: XA (incluye alquiler del galp\u00F3n)', o => o.xa, T.xa, { c: 'var(--g)' }),
+                        row('ro', 'Resultado operativo (antes del sueldo del due\u00F1o)', o => o.op, T.op, { b: 1, c: 'var(--b)', bg: BG }),
+                        row('mo', 'Margen operativo (% de ventas)', o => pv(o.op, o.ventas), pv(T.op, T.ven), { p: 1, i: 1, ind: 1 }),
+                        row('du', 'Sueldo y retiros del due\u00F1o', o => o.dueno, T.dueno, { c: 'var(--o)' }),
+                        row('rf', 'Resultado final del mes', o => o.fin, T.fin, { b: 1, bg: BG }),
+                        React.createElement("tr", { key: 'ac' },
+                            React.createElement("td", { style: { position: 'sticky', left: 0, background: BG, fontWeight: 700 } }, "Resultado acumulado"),
+                            ACC.map((v, i) => React.createElement(FzTd, { key: i, v: v, b: true })),
+                            React.createElement(FzTd, { v: ACC.length ? ACC[ACC.length - 1] : 0, b: true })))))),
+        flagged.length > 0 && React.createElement(FzTip, null,
+            "* ",
+            flagged.map(k => lab(k) + ' (' + flag(k) + ')').join(' · '),
+            ". En esos meses el resultado se ve peor de lo real porque faltan las ventas."),
+        React.createElement(FzTip, null, bs === 'pg' ? 'Los egresos son lo efectivamente pagado: cada pago cuenta en el mes en que se hizo, y lo agendado todavía no cuenta. ' : 'Los egresos son el monto total de cada salida en el mes en que se cargó, esté pagado o no. ', "El costo de ventas es lo que pagaste de mercader\u00EDa y fletes ese mes (no el costo de lo que vendiste), as\u00ED que un mes de mucha compra de stock se ve flojo. Los m\u00E1rgenes son sobre el precio de venta, y mirarlos en varios meses juntos es m\u00E1s confiable."),
+        React.createElement(FzSupuestos, { cf: cf, be: null, part: "cls" }));
+}
+/* ---------- punto de equilibrio ---------- */
+function PuntoEquilibrio({ model, ms, cf, be, HK }) {
+    const { M } = model, pe = be.pe, fl = k => k === HK ? 'En curso' : M[k].ventas === 0 ? 'Sin ingresos' : pe == null ? '–' : M[k].ventas >= pe ? 'Sobre el equilibrio' : 'Bajo el equilibrio';
+    const seg = pe && be.avg ? (be.avg - pe) / be.avg : NaN;
+    const gl = Object.entries(be.g).map(([n, v]) => ({ n, v: v / Math.max(1, be.cl.length) })).sort((a, b) => b.v - a.v);
+    const cmp = (cal, man, f) => man ? React.createElement("span", { className: "mut" }, "Manual (calculado: " + f(cal) + ")") : React.createElement("span", { className: "mut" }, "Calculado con " + be.cl.length + " meses cerrados");
+    const rows = ms.map(k => ({ k, v: M[k].ventas, st: fl(k) }));
+    const bajo = rows.filter(r => r.st === 'Bajo el equilibrio');
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement(FzSupuestos, { cf: cf, be: be, part: "be" }),
+        !be.cl.length && React.createElement("div", { className: "card p-4 text-sm", style: { color: 'var(--r)' } }, "Todav\u00EDa no hay meses cerrados con ventas cargadas para calcular. Carg\u00E1 los ingresos del mes o escrib\u00ED el margen y los gastos fijos a mano."),
+        React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))' } },
+            React.createElement(Kpi, { l: "Punto de equilibrio por mes", v: pe == null ? '–' : fzM(pe), c: "var(--b)", s: "Ventas que cubren todos los gastos fijos" }),
+            React.createElement(Kpi, { l: "Margen bruto usado", v: fzPct(be.mg), c: "var(--g)", s: cmp(be.mgC, be.manMg, fzPct) }),
+            React.createElement(Kpi, { l: "Gastos fijos por mes", v: fzM(be.fj), c: "var(--o)", s: cmp(be.fjC, be.manFj, $M) }),
+            React.createElement(Kpi, { l: "Ventas promedio", v: fzM(be.avg), c: "var(--b)", s: be.cl.length ? 'Promedio de ' + be.cl.map(lab).join(', ') : 'Sin meses cerrados' }),
+            React.createElement(Kpi, { l: "Margen de seguridad", v: fzPct(seg), c: seg < 0 ? 'var(--r)' : 'var(--g)', s: seg < 0 ? 'Las ventas promedio no llegan al equilibrio' : 'Cu\u00E1nto pueden caer las ventas antes de perder' })),
+        React.createElement(Card, { t: "Ventas por mes contra el punto de equilibrio" },
+            React.createElement(GBars, { labels: ms.map(lab), series: [{ name: 'Ventas', color: 'var(--g)', vals: ms.map(k => M[k].ventas) }], line: pe == null ? undefined : ms.map(() => pe), lineName: 'Punto de equilibrio', lineColor: 'var(--r)' })),
+        React.createElement("div", { className: "grid gap-4 grid-cols-1 lg:grid-cols-2" },
+            React.createElement("section", { className: "card p-4", style: { minWidth: 0 } },
+                React.createElement("h3", { className: "font-semibold mb-3", style: { fontSize: 15 } }, "De d\u00F3nde salen los gastos fijos (promedio por mes)"),
+                React.createElement("div", { className: "overflow-x-auto" }, React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
+                    React.createElement("tbody", null,
+                        gl.map(r => React.createElement("tr", { key: r.n },
+                            React.createElement("td", null, fzL(r.n)),
+                            React.createElement("td", { className: "num text-right" }, $(r.v)))),
+                        React.createElement("tr", null,
+                            React.createElement("td", { className: "font-semibold" }, "Total gastos fijos"),
+                            React.createElement("td", { className: "num text-right font-semibold" }, $(be.fjG))),
+                        cf.v.xa && React.createElement("tr", null,
+                            React.createElement("td", null, "Menos: XA (alquiler del galp\u00F3n)"),
+                            React.createElement("td", { className: "num text-right", style: { color: 'var(--g)' } }, '-' + $(be.xaA))),
+                        React.createElement("tr", null,
+                            React.createElement("td", { className: "font-semibold" }, "Gastos fijos calculados"),
+                            React.createElement("td", { className: "num text-right font-semibold" }, $(be.fjC))))))),
+            React.createElement("section", { className: "card p-4", style: { minWidth: 0 } },
+                React.createElement("h3", { className: "font-semibold mb-3", style: { fontSize: 15 } }, "Cada mes contra el equilibrio"),
+                React.createElement("div", { className: "overflow-auto", style: { maxHeight: 340 } },
+                    React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
+                        React.createElement("thead", null,
+                            React.createElement("tr", null,
+                                React.createElement("th", null, "Mes"),
+                                React.createElement("th", { className: "text-right" }, "Ventas"),
+                                React.createElement("th", { className: "text-right" }, "Contra equilibrio"),
+                                React.createElement("th", null, "Estado"))),
+                        React.createElement("tbody", null, rows.slice().reverse().map(r => React.createElement("tr", { key: r.k },
+                            React.createElement("td", null, lab(r.k)),
+                            React.createElement("td", { className: "num text-right" }, $(r.v)),
+                            React.createElement("td", { className: "num text-right", style: { color: pe != null && r.v < pe ? 'var(--r)' : 'var(--g)' } }, pe == null || !r.v ? '–' : (r.v - pe >= 0 ? '+' : '') + $(r.v - pe)),
+                            React.createElement("td", { className: "text-xs", style: { color: r.st === 'Bajo el equilibrio' ? 'var(--r)' : r.st === 'Sobre el equilibrio' ? 'var(--g)' : 'var(--mut)' } }, r.st)))))))),
+        bajo.length > 0 && React.createElement(FzTip, null,
+            "Meses bajo el equilibrio en el per\u00EDodo elegido: ",
+            bajo.map(r => lab(r.k)).join(', '),
+            "."),
+        React.createElement(FzTip, null, "Punto de equilibrio = gastos fijos \u00F7 margen bruto. Los gastos fijos son todo lo que no es mercader\u00EDa ni fletes (marketing, impuestos, servicios, alquiler, sueldos y el sueldo del due\u00F1o). El margen es el real: (ventas - mercader\u00EDa y fletes pagados) \u00F7 ventas, sobre el precio de venta. Se calculan con los \u00FAltimos meses cerrados con ventas cargadas; si escrib\u00EDs un valor a mano, se usa ese."));
+}
+/* ---------- análisis ---------- */
+function FzIndicadores({ model, ms }) {
+    const { M } = model, T = fzSum(M, ms), pv = (x, y) => y > 0 ? x / y : NaN;
+    let a = 0;
+    const ACC = ms.map(k => a += M[k].fin);
+    const pc = v => isFinite(v) ? v * 100 : 0, fp = v => v.toFixed(1).replace('.', ',') + ' %';
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))' } },
+            React.createElement(Kpi, { l: "Margen bruto", v: fzPct(pv(T.bruto, T.ven)), c: "var(--b)", s: "Sobre ventas, despu\u00E9s de mercader\u00EDa y fletes" }),
+            React.createElement(Kpi, { l: "Margen operativo", v: fzPct(pv(T.op, T.ven)), c: T.op < 0 ? 'var(--r)' : 'var(--b)', s: "Antes del sueldo del due\u00F1o, con XA" }),
+            React.createElement(Kpi, { l: "Marketing sobre ventas", v: fzPct(pv(T.mkt, T.ven)), c: "var(--o)", s: fzM(T.mkt) + ' en el per\u00EDodo' }),
+            React.createElement(Kpi, { l: "Sueldo del due\u00F1o sobre ventas", v: fzPct(pv(T.dueno, T.ven)), c: "var(--o)", s: fzM(T.dueno) + ' en el per\u00EDodo' }),
+            React.createElement(Kpi, { l: "Resultado del per\u00EDodo", v: fzM(T.fin), c: T.fin < 0 ? 'var(--r)' : 'var(--g)', s: fzM(ms.length ? T.fin / ms.length : 0) + ' por mes, despu\u00E9s de tu sueldo' })),
+        React.createElement(Card, { t: "M\u00E1rgenes mes a mes (% de las ventas)" },
+            React.createElement(GBars, { labels: ms.map(lab), series: [{ name: 'Margen bruto', color: 'var(--b)', vals: ms.map(k => pc(pv(M[k].bruto, M[k].ventas))) }, { name: 'Margen operativo', color: 'var(--g)', vals: ms.map(k => pc(pv(M[k].op, M[k].ventas))) }], fm: fp, fa: v => Math.round(v) + '%' })),
+        React.createElement("section", { className: "card" },
+            React.createElement("div", { className: "overflow-x-auto", style: { maxHeight: 460 } },
+                React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
+                    React.createElement("thead", null,
+                        React.createElement("tr", null, ['Mes', 'Ventas', 'Margen bruto', 'Marketing / ventas', 'Due\u00F1o / ventas', 'Resultado del mes', 'Acumulado'].map((h, i) => React.createElement("th", { key: h, className: i ? 'text-right' : '' }, h)))),
+                    React.createElement("tbody", null, ms.map((k, i) => { const o = M[k]; return React.createElement("tr", { key: k },
+                        React.createElement("td", null, lab(k) + (o.complete ? '' : ' *')),
+                        React.createElement(FzTd, { v: o.ventas }),
+                        React.createElement(FzTd, { v: pv(o.bruto, o.ventas), p: 1 }),
+                        React.createElement(FzTd, { v: pv(o.mkt, o.ventas), p: 1 }),
+                        React.createElement(FzTd, { v: pv(o.dueno, o.ventas), p: 1 }),
+                        React.createElement(FzTd, { v: o.fin, b: 1 }),
+                        React.createElement(FzTd, { v: ACC[i], b: 1 })); }),
+                        React.createElement("tr", { key: 't' },
+                            React.createElement("td", { className: "font-semibold" }, "Per\u00EDodo"),
+                            React.createElement(FzTd, { v: T.ven, b: 1 }),
+                            React.createElement(FzTd, { v: pv(T.bruto, T.ven), p: 1, b: 1 }),
+                            React.createElement(FzTd, { v: pv(T.mkt, T.ven), p: 1, b: 1 }),
+                            React.createElement(FzTd, { v: pv(T.dueno, T.ven), p: 1, b: 1 }),
+                            React.createElement(FzTd, { v: T.fin, b: 1 }),
+                            React.createElement(FzTd, { v: ACC.length ? ACC[ACC.length - 1] : 0, b: 1 })))))),
+        React.createElement(FzTip, null, "* Mes sin ventas cargadas: el margen de ese mes no es confiable. Los porcentajes mensuales se mueven mucho porque la mercader\u00EDa se cuenta cuando se paga; mir\u00E1 el total del per\u00EDodo."));
+}
+function FzEstacion({ model, be, HK }) {
+    const { M, keys } = model, yrs = [...new Set(keys.map(k => Math.floor(k / 100)))], [yr, sYr] = useState(() => yrs.includes(Math.floor(HK / 100)) ? Math.floor(HK / 100) : yrs[yrs.length - 1]);
+    const v = (y, m) => { const o = M[ym(y, m)]; return o ? o.ventas : 0; };
+    const st = (y, m) => { const k = ym(y, m), o = M[k]; return !o ? 'sin datos' : k === HK ? 'en curso' : k > HK ? 'futuro' : !o.complete ? 'incompleto' : o.ventas === 0 ? 'sin datos' : be.pe == null ? 'ok' : o.ventas < be.pe ? 'bajo' : 'ok'; };
+    const bajo = MN.map((_, i) => i + 1).filter(m => st(yr, m) === 'bajo');
+    const tr = keys.filter(k => k < HK && M[k].complete && M[k].ventas > 0), last12 = keys.slice(-12);
+    const mm = last12.map(k => { const i = keys.indexOf(k), w = keys.slice(Math.max(0, i - 2), i + 1).map(x => M[x].ventas); return sum(w, x => x) / w.length; });
+    const u3 = tr.slice(-3), p3 = tr.slice(-6, -3), au = sum(u3, k => M[k].ventas) / Math.max(1, u3.length), ap = sum(p3, k => M[k].ventas) / Math.max(1, p3.length);
+    const tv = p3.length === 3 && u3.length === 3 && ap > 0 ? au / ap - 1 : NaN;
+    const stL = { bajo: 'Bajo el equilibrio', ok: 'Sobre el equilibrio', incompleto: 'Sin ventas cargadas', 'en curso': 'Mes en curso', 'sin datos': '–', futuro: '–' };
+    const dl = (a, b) => a > 0 && b > 0 ? b / a - 1 : NaN;
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("section", { className: "card p-4 flex flex-wrap gap-4 items-end" },
+            React.createElement(Ctl, { l: "A\u00F1o a mirar (se compara con el anterior)" },
+                React.createElement("span", { className: "flex gap-2" }, yrs.map(y => React.createElement("button", { key: y, className: 'btn ' + (yr === y ? 'p' : ''), onClick: () => sYr(y) }, y))))),
+        React.createElement(Card, { t: 'Ventas mes a mes: ' + yr + ' contra ' + (yr - 1) },
+            React.createElement(GBars, { labels: MN, series: [{ name: String(yr - 1), color: 'var(--mut)', vals: MN.map((_, i) => v(yr - 1, i + 1)) }, { name: String(yr), color: 'var(--g)', vals: MN.map((_, i) => v(yr, i + 1)) }], line: be.pe == null ? undefined : MN.map(() => be.pe), lineName: 'Punto de equilibrio', lineColor: 'var(--r)' })),
+        React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' } },
+            React.createElement(Kpi, { l: "Meses bajo el equilibrio en " + yr, v: String(bajo.length), c: bajo.length ? 'var(--r)' : 'var(--g)', s: bajo.length ? bajo.map(m => MN[m - 1]).join(', ') : 'Ninguno entre los meses completos' }),
+            React.createElement(Kpi, { l: "Tendencia reciente", v: isFinite(tv) ? (tv >= 0 ? '+' : '') + fzPct(tv) : '–', c: tv < 0 ? 'var(--r)' : 'var(--g)', s: isFinite(tv) ? 'Promedio de ' + u3.map(lab).join(', ') + ' contra los 3 meses anteriores' : 'Hacen falta 6 meses cerrados' }),
+            React.createElement(Kpi, { l: "Mejor mes de " + yr, v: (() => { const a = MN.map((_, i) => [i, v(yr, i + 1)]).filter(([i]) => st(yr, i + 1) !== 'incompleto' && st(yr, i + 1) !== 'en curso' && st(yr, i + 1) !== 'futuro').sort((x, y) => y[1] - x[1])[0]; return a && a[1] ? MN[a[0]] : '–'; })(), c: "var(--b)", s: "Entre los meses completos" })),
+        React.createElement(Card, { t: "Ventas y promedio m\u00F3vil de 3 meses (\u00FAltimos 12 meses)" },
+            React.createElement(Lines, { labels: last12.map(lab), series: [{ name: 'Ventas', color: 'var(--g)', vals: last12.map(k => M[k].ventas) }, { name: 'Promedio m\u00F3vil 3 meses', color: 'var(--b)', vals: mm }] })),
+        React.createElement("section", { className: "card" },
+            React.createElement("div", { className: "overflow-x-auto" },
+                React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
+                    React.createElement("thead", null,
+                        React.createElement("tr", null, ['Mes', String(yr - 1), String(yr), 'Variaci\u00F3n', 'Estado ' + yr].map((h, i) => React.createElement("th", { key: h, className: i && i < 4 ? 'text-right' : '' }, h)))),
+                    React.createElement("tbody", null, MN.map((n, i) => { const a = v(yr - 1, i + 1), b = v(yr, i + 1), s = st(yr, i + 1), d = dl(a, b); return React.createElement("tr", { key: n },
+                        React.createElement("td", null, cap(n)),
+                        React.createElement(FzTd, { v: a }),
+                        React.createElement(FzTd, { v: b }),
+                        React.createElement("td", { className: "num text-right", style: { color: d < 0 ? 'var(--r)' : 'var(--g)' } }, isFinite(d) && s !== 'incompleto' && s !== 'en curso' ? (d >= 0 ? '+' : '') + fzPct(d) : '–'),
+                        React.createElement("td", { className: "text-xs", style: { color: s === 'bajo' ? 'var(--r)' : s === 'ok' ? 'var(--g)' : 'var(--mut)' } }, stL[s])); })))),
+            React.createElement(FzTip, null, "El estado compara las ventas del mes con el punto de equilibrio actual (",
+                be.pe == null ? 'sin calcular' : $(be.pe),
+                "). Los meses sin ventas cargadas o en curso no se comparan.")));
+}
+function FzGastos({ D, model, ms, bs, cf }) {
+    const { M } = model, T = fzSum(M, ms), set = new Set(ms);
+    const E = useMemo(() => fzEgr(D, bs).filter(e => set.has(e.k)), [D, bs, ms.join()]);
+    const pv = x => T.ven > 0 ? x / T.ven : NaN;
+    const names = ['MERC', 'FLETES', ...Object.keys(T.g).filter(n => fzIsOp(n) || n === 'DUENO').sort((a, b) => (a === 'MKT' ? -1 : b === 'MKT' ? 1 : T.g[b] - T.g[a]))].filter(n => Math.abs(T.g[n] || 0) > 0.5);
+    const tot = sum(names, n => T.g[n] || 0), mer = E.filter(e => e.t === 'merc'), mt = sum(mer, e => e.m);
+    const bp = by(mer.map(e => ({ ...e, p: e.p || 'SIN PROVEEDOR' })), 'p', e => e.m), tp = i => sum(bp.slice(0, i), x => x.value) / (mt || 1);
+    const sp = by(E.filter(e => e.t === 'serv'), 'p', e => e.m);
+    const fm = (t, d) => v => fzM(v) + ' · ' + (d > 0 ? (v / d * 100).toFixed(1).replace('.', ',') + ' %' : '–');
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", { className: "grid gap-4 grid-cols-1 lg:grid-cols-2" },
+            React.createElement(Card, { t: "Cada rubro (monto y % de las ventas)" },
+                React.createElement(HBars, { max: 14, fmt: fm('v', T.ven), items: names.map(n => ({ name: fzL(n), value: T.g[n] || 0, color: n === 'MERC' || n === 'FLETES' ? 'var(--o)' : n === 'DUENO' ? 'var(--b)' : 'var(--r)' })) })),
+            React.createElement(Card, { t: "Mercader\u00EDa por proveedor (monto y % de la mercader\u00EDa)" },
+                React.createElement(HBars, { max: 10, fmt: fm('m', mt), color: "var(--o)", items: bp }))),
+        React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))' } },
+            React.createElement(Kpi, { l: "Proveedor principal", v: bp.length ? fzPct(bp[0].value / (mt || 1), 0) : '–', c: "var(--o)", s: bp.length ? bp[0].name + ' · ' + fzM(bp[0].value) : 'Sin mercader\u00EDa en el per\u00EDodo' }),
+            React.createElement(Kpi, { l: "Tres principales", v: bp.length ? fzPct(tp(3), 0) : '–', c: "var(--o)", s: bp.slice(0, 3).map(x => x.name).join(', ') }),
+            React.createElement(Kpi, { l: "Cinco principales", v: bp.length ? fzPct(tp(5), 0) : '–', c: "var(--o)", s: "De toda la mercader\u00EDa pagada" }),
+            React.createElement(Kpi, { l: "Egresos totales", v: fzM(tot), c: "var(--r)", s: fzPct(pv(tot), 0) + ' de las ventas' })),
+        React.createElement("section", { className: "card" },
+            React.createElement("div", { className: "overflow-x-auto" },
+                React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
+                    React.createElement("thead", null,
+                        React.createElement("tr", null, ['Rubro', 'Total', 'Promedio por mes', '% de las ventas', '% del egreso total'].map((h, i) => React.createElement("th", { key: h, className: i ? 'text-right' : '' }, h)))),
+                    React.createElement("tbody", null,
+                        names.map(n => React.createElement("tr", { key: n },
+                            React.createElement("td", null, fzL(n)),
+                            React.createElement(FzTd, { v: T.g[n] || 0 }),
+                            React.createElement(FzTd, { v: (T.g[n] || 0) / Math.max(1, ms.length) }),
+                            React.createElement(FzTd, { v: pv(T.g[n] || 0), p: 1 }),
+                            React.createElement(FzTd, { v: tot > 0 ? (T.g[n] || 0) / tot : NaN, p: 1 }))),
+                        React.createElement("tr", null,
+                            React.createElement("td", { className: "font-semibold" }, "Total egresos"),
+                            React.createElement(FzTd, { v: tot, b: 1 }),
+                            React.createElement(FzTd, { v: tot / Math.max(1, ms.length), b: 1 }),
+                            React.createElement(FzTd, { v: pv(tot), p: 1, b: 1 }),
+                            React.createElement(FzTd, { v: 1, p: 1, b: 1 })))))),
+        React.createElement(Card, { t: "Servicios y gastos por proveedor" },
+            React.createElement(HBars, { max: 10, color: "var(--r)", fmt: fm('s', sum(sp, x => x.value)), items: sp })),
+        React.createElement(FzTip, null, "El marketing y el sueldo del due\u00F1o se separan seg\u00FAn los proveedores que figuran en Supuestos (pesta\u00F1a Estado de resultados). Si pag\u00E1s Meta o la pauta con otro nombre de proveedor, agregalo ah\u00ED."));
+}
+function FzCaja({ D, regs, CT, CJ, SC, be }) {
+    const H = hoy();
+    const ctas = useMemo(() => CT.items.filter(x => x.k === 'cta'), [CT.items]), act = ctas.filter(c => c.act !== false), cfg = CT.items.find(x => x.k === 'cfg'), movs = CJ.items;
+    const stc = useMemo(() => { const v = SC.items.filter(x => +x.tc > 0).sort((a, b) => String(a.f) < String(b.f) ? -1 : 1); return v.length ? +v[v.length - 1].tc : 0; }, [SC.items]);
+    const tcN = cfg && +cfg.tc > 0 ? +cfg.tc : stc;
+    const tARS = sum(act.filter(c => c.mon === 'ARS'), c => saldoAt(c, movs, H)), tUSD = sum(act.filter(c => c.mon === 'USD'), c => saldoAt(c, movs, H)), total = tARS + tUSD * tcN;
+    const cp = useMemo(() => comprometido(regs, movs, act, H, D), [regs, movs, CT.items, D]);
+    const libre = total - cp.total, dia = be.fj / 30;
+    const dias = v => dia > 0 ? Math.floor(Math.max(0, v) / dia) : null;
+    const [dv, sDv] = useState(0), [dm, sDm] = useState(0), [df, sDf] = useState(0);
+    const V0 = be.avg, mg0 = be.mg, fj0 = be.fj, r0 = V0 * mg0 - fj0;
+    const V1 = V0 * (1 + dv / 100), mg1 = mg0 + dm / 100, fj1 = fj0 * (1 + df / 100), r1 = V1 * mg1 - fj1, pe1 = mg1 > 0 ? fj1 / mg1 : null;
+    const sl = (l, v, s, mn, mx, st, u) => React.createElement(Ctl, { l: l + ': ' + (v > 0 ? '+' : '') + v + u },
+        React.createElement("input", { type: "range", min: mn, max: mx, step: st, value: v, onChange: e => s(+e.target.value), style: { width: 220 } }));
+    const gridV = [-20, -10, 0, 10, 20], gridM = [-5, -2.5, 0, 2.5, 5];
+    const cell = (a, b) => { const r = V0 * (1 + a / 100) * (mg0 + b / 100) - fj0; return React.createElement("td", { key: b, className: "num text-right", style: { color: r < 0 ? 'var(--r)' : 'var(--g)', fontWeight: a === 0 && b === 0 ? 700 : 400, background: a === 0 && b === 0 ? 'var(--bg)' : undefined } }, fzM(r)); };
+    return React.createElement("div", { className: "space-y-4" },
+        !act.length && React.createElement("div", { className: "card p-4 text-sm", style: { color: 'var(--r)' } }, "Todav\u00EDa no hay cuentas cargadas en la pesta\u00F1a Caja, as\u00ED que no se puede calcular cu\u00E1ntos d\u00EDas cubre tu saldo."),
+        React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))' } },
+            React.createElement(Kpi, { l: "Saldo en Caja", v: fzM(total), c: "var(--b)", s: tUSD ? 'Incluye USD ' + Math.round(tUSD) + (tcN ? ' a $' + Math.round(tcN) : ' sin cotizaci\u00F3n cargada') : 'Todas las cuentas activas' }),
+            React.createElement(Kpi, { l: "Comprometido a pagos", v: fzM(cp.total), c: "var(--o)", s: "Agendados, saldos y tarjeta" }),
+            React.createElement(Kpi, { l: "Saldo libre", v: fzM(libre), c: libre < 0 ? 'var(--r)' : 'var(--g)', s: "Saldo menos comprometido" }),
+            React.createElement(Kpi, { l: "D\u00EDas que cubre el saldo", v: dias(total) == null ? '–' : dias(total) + ' d\u00EDas', c: "var(--b)", s: 'Solo gastos fijos de ' + fzM(be.fj) + ' por mes, sin vender nada' }),
+            React.createElement(Kpi, { l: "D\u00EDas con el saldo libre", v: dias(libre) == null ? '–' : dias(libre) + ' d\u00EDas', c: libre < 0 ? 'var(--r)' : 'var(--b)', s: "Despu\u00E9s de pagar lo comprometido" })),
+        React.createElement(FzTip, null, "Los gastos fijos son los del Punto de equilibrio (", be.manFj ? 'manuales' : 'calculados', ", ", be.fj ? $(be.fj) : '$0', " por mes, ", $(dia), " por d\u00EDa). Incluyen tu sueldo y descuentan lo que cobr\u00E1s de XA si est\u00E1 tildado."),
+        React.createElement("section", { className: "card p-4 space-y-4" },
+            React.createElement("h3", { className: "font-semibold", style: { fontSize: 15 } }, "Simulador: \u00BFqu\u00E9 pasa si cambia...?"),
+            React.createElement("div", { className: "flex flex-wrap gap-5 items-end" },
+                sl('Ventas', dv, sDv, -40, 40, 5, ' %'),
+                sl('Margen bruto', dm, sDm, -10, 10, 1, ' pts'),
+                sl('Gastos fijos', df, sDf, -30, 30, 5, ' %'),
+                React.createElement("button", { className: "btn", onClick: () => { sDv(0); sDm(0); sDf(0); } }, "Volver a lo real")),
+            React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' } },
+                React.createElement(Kpi, { l: "Ventas por mes", v: fzM(V1), c: "var(--g)", s: 'Hoy ' + fzM(V0) }),
+                React.createElement(Kpi, { l: "Resultado por mes", v: fzM(r1), c: r1 < 0 ? 'var(--r)' : 'var(--g)', s: 'Hoy ' + fzM(r0) + ' · cambio ' + (r1 - r0 >= 0 ? '+' : '') + fzM(r1 - r0) }),
+                React.createElement(Kpi, { l: "Punto de equilibrio", v: pe1 == null ? '–' : fzM(pe1), c: "var(--b)", s: 'Hoy ' + (be.pe == null ? '–' : fzM(be.pe)) }),
+                React.createElement(Kpi, { l: "D\u00EDas que cubre el saldo", v: fj1 > 0 ? Math.floor(Math.max(0, total) / (fj1 / 30)) + ' d\u00EDas' : '–', c: "var(--b)", s: 'Hoy ' + (dias(total) == null ? '–' : dias(total) + ' d\u00EDas') })),
+            React.createElement("div", null,
+                React.createElement("div", { className: "text-sm font-semibold mb-2" }, "Resultado por mes seg\u00FAn ventas y margen (despu\u00E9s de gastos fijos y de tu sueldo)"),
+                React.createElement("div", { className: "overflow-x-auto" },
+                    React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
+                        React.createElement("thead", null,
+                            React.createElement("tr", null,
+                                React.createElement("th", null, "Ventas \\ Margen"),
+                                gridM.map(b => React.createElement("th", { key: b, className: "text-right" }, fzPct(mg0 + b / 100))))),
+                        React.createElement("tbody", null, gridV.map(a => React.createElement("tr", { key: a },
+                            React.createElement("td", { className: "font-semibold" }, (a > 0 ? '+' : '') + a + ' % (' + fzM(V0 * (1 + a / 100)) + ')'),
+                            gridM.map(b => cell(a, b))))))))),
+        React.createElement(FzTip, null, "Partimos de las ventas promedio, el margen y los gastos fijos del Punto de equilibrio. Es una cuenta simple: no considera estacionalidad ni cambios en el costo de reposici\u00F3n."));
+}
+function FzAnalisis(props) {
+    const [sec, sSec] = useState('ind');
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", { className: "flex flex-wrap gap-2" }, [['ind', 'Indicadores clave'], ['est', 'Estacionalidad y tendencia'], ['gas', 'Gastos y proveedores'], ['caj', 'D\u00EDas de caja y simulador']].map(([k, l]) => React.createElement("button", { key: k, className: 'btn ' + (sec === k ? 'p' : ''), onClick: () => sSec(k) }, l))),
+        sec === 'ind' && React.createElement(FzIndicadores, props),
+        sec === 'est' && React.createElement(FzEstacion, props),
+        sec === 'gas' && React.createElement(FzGastos, props),
+        sec === 'caj' && React.createElement(FzCaja, props));
+}
+const FZ_SUB = [['flu', 'Flujo de caja'], ['proy', 'Proyección'], ['er', 'Estado de resultados'], ['pe', 'Punto de equilibrio'], ['an', 'Análisis'], ['comp', 'Comparar años']];
+function Finanzas({ D, regs, rc, CT, CJ, SC, CF }) {
+    const H = hoy(), HK = ymOf(H);
+    const [sub, sSub] = useState(() => { try {
+        const s = localStorage.getItem('ruma_fin_sub');
+        return FZ_SUB.some(x => x[0] === s) ? s : 'flu';
+    }
+    catch (e) {
+        return 'flu';
+    } });
+    const go = k => { sSub(k); try {
+        localStorage.setItem('ruma_fin_sub', k);
+    }
+    catch (e) { } };
+    const cf = useFzCfg(CF), [bs, sBs] = useState('pg');
+    const model = useMemo(() => fzModel(D, cf.v, bs), [D, cf.v.mkt, cf.v.dueno, bs]);
+    const keys = model.keys, last = keys[keys.length - 1], be = useMemo(() => fzBE(model, cf.v, HK), [model, cf.v.win, cf.v.xa, cf.v.mg, cf.v.fj]);
+    const y0 = ym(new Date().getFullYear(), 1);
+    const [fromS, sF] = useState(null), [toS, sT] = useState(null);
+    const lastV = [...keys].reverse().find(k => k < HK && model.M[k].ventas > 0) || last;
+    const from = fromS != null ? fromS : Math.max(keys[0], Math.min(y0, lastV)), to = toS != null ? toS : lastV;
+    const ms = keys.filter(k => k >= from && k <= to);
+    const common = { model, ms, bs, cf, be, HK, D, regs, CT, CJ, SC };
+    const needs = ['er', 'an'].includes(sub);
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", { className: "flex flex-wrap gap-2" }, FZ_SUB.map(([k, l]) => React.createElement("button", { key: k, className: 'btn ' + (sub === k ? 'p' : ''), onClick: () => go(k), "aria-current": sub === k ? 'page' : undefined }, l))),
+        needs && keys.length > 0 && React.createElement(FzRango, { keys: keys, lastV: lastV, from: from, to: to, sF: sF, sT: sT, bs: bs, sBs: sBs, noBase: false }),
+        sub === 'flu' && React.createElement(Flujo, { D: D }),
+        sub === 'proy' && React.createElement(Proyeccion, { D: D, regs: regs, rc: rc }),
+        sub === 'comp' && React.createElement(Comp, { D: D }),
+        sub === 'er' && (ms.length ? React.createElement(EstadoResultados, common) : React.createElement("div", { className: "card p-4 mut" }, "No hay datos en el per\u00EDodo elegido.")),
+        sub === 'pe' && (keys.length ? React.createElement(PuntoEquilibrio, { ...common, ms: keys.slice(-12) }) : React.createElement("div", { className: "card p-4 mut" }, "Todav\u00EDa no hay datos.")),
+        sub === 'an' && (ms.length ? React.createElement(FzAnalisis, common) : React.createElement("div", { className: "card p-4 mut" }, "No hay datos en el per\u00EDodo elegido.")));
+}
+
 function App() {
     const [tab, sTab] = useState('gen'), [year, sYear] = useState('2026'), [ft, sFt] = useState('ing');
-    const R = useCol('registros', 'ruma_reg'), RC = useCol('recurrentes', 'ruma_rec'), SC = useCol('stock', 'ruma_stock'), CT = useCol('cuentas', 'ruma_cta'), CJ = useCol('caja', 'ruma_caja'), PX = useCol('pagosx', 'ruma_px');
+    const R = useCol('registros', 'ruma_reg'), RC = useCol('recurrentes', 'ruma_rec'), SC = useCol('stock', 'ruma_stock'), CT = useCol('cuentas', 'ruma_cta'), CJ = useCol('caja', 'ruma_caja'), PX = useCol('pagosx', 'ruma_px'), CF = useCol('config', 'ruma_cfg');
     const regs = R.items, dbs = R.st;
     const mkMov = (cj, r, id) => ({ tp: 'egr', f: cj.f, cta: cj.cta, ct2: null, mt: cj.mt, mt2: null, tc: null, cat: /^(SUELDOS|RETIRO)/.test(r.c || '') ? 'Sueldo / retiro personal' : r.c === 'IMPUESTOS' ? 'Impuestos' : r.t === 'merc' ? 'Pago a proveedor' : 'Servicios', mk: null, d: ((r.p || '') + (r.c ? ' · ' + r.c : '')) || null, rid: id, fc: new Date().toISOString() });
     const add = async (rec, cj) => { const id = await R.add(rec); if (cj)
@@ -2906,9 +3397,9 @@ function App() {
     }, [regs, PX.items]);
     const go = t => { sFt(t); sTab('carga'); };
     const f = a => year === 'all' ? a : a.filter(r => r.y === +year);
-    const TABS = [['gen', 'Visión general', 'home'], ['ing', 'Ingresos', 'trend'], ['vta', 'Ventas', 'bag'], ['merc', 'Salida de mercadería', 'box'], ['serv', 'Salida de servicios', 'wrench'], ['caja', 'Caja', 'wallet'], ['agenda', 'Agenda de pagos', 'bell'], ['cal', 'Calendario', 'calendar'], ['prov', 'Comparar proveedores', 'scale'], ['flu', 'Flujo de caja', 'cash'], ['proy', 'Proyección de caja', 'line'], ['stock', 'Stock valorizado', 'layers'], ['comp', 'Comparar años', 'bars'], ['carga', 'Cargar datos', 'plus']];
+    const TABS = [['gen', 'Visión general', 'home'], ['ing', 'Ingresos', 'trend'], ['vta', 'Ventas', 'bag'], ['merc', 'Salida de mercadería', 'box'], ['serv', 'Salida de servicios', 'wrench'], ['caja', 'Caja', 'wallet'], ['agenda', 'Agenda de pagos', 'bell'], ['cal', 'Calendario', 'calendar'], ['prov', 'Comparar proveedores', 'scale'], ['fin', 'Finanzas', 'cash'], ['stock', 'Stock valorizado', 'layers'], ['carga', 'Cargar datos', 'plus']];
     const title = TABS.find(t => t[0] === tab)[1];
-    const HD = { caja: 'Saldo por cuenta y monto comprometido a pagos', vta: 'Ventas de Tienda Nube y local, y ventas de DUX (pedidos)', agenda: 'Pagos agendados, vencimientos y cuánto se acumula por mes en la tarjeta de crédito', cal: 'Salidas pagadas y agendadas, día por día', stock: 'Cuánto vale la mercadería que tenés y cómo cambia la rentabilidad real del negocio', proy: 'Cómo queda la caja los próximos meses con lo agendado, la tarjeta y los pagos fijos' };
+    const HD = { fin: 'Flujo de caja, proyección, estado de resultados, punto de equilibrio y análisis financiero', caja: 'Saldo por cuenta y monto comprometido a pagos', vta: 'Ventas de Tienda Nube y local, y ventas de DUX (pedidos)', agenda: 'Pagos agendados, vencimientos y cuánto se acumula por mes en la tarjeta de crédito', cal: 'Salidas pagadas y agendadas, día por día', stock: 'Cuánto vale la mercadería que tenés y cómo cambia la rentabilidad real del negocio', proy: 'Cómo queda la caja los próximos meses con lo agendado, la tarjeta y los pagos fijos' };
     const tb = (k, cat, catL, nl) => React.createElement(Table, { key: k + year, rows: D[k], cols: C[k], cat: cat, catL: catL, init: year, onNew: nl && (() => go(k)), newL: nl });
     return React.createElement(CajaCtx.Provider, { value: cv },
         React.createElement("div", { className: "app" },
@@ -2963,11 +3454,9 @@ function App() {
                     tb('serv', 'c', 'Concepto', 'Nueva salida')),
                 tab === 'vta' && React.createElement(VentasTab, { D: D }),
                 tab === 'prov' && React.createElement(ProvComp, { D: D }),
-                tab === 'flu' && React.createElement(Flujo, { D: D }),
-                tab === 'comp' && React.createElement(Comp, { D: D }),
+                tab === 'fin' && React.createElement(Finanzas, { D: D, regs: regs, rc: RC, CT: CT, CJ: CJ, SC: SC, CF: CF }),
                 tab === 'caja' && React.createElement(Caja, { D: D, regs: regs, CT: CT, CJ: CJ, SC: SC, go: sTab }),
                 tab === 'agenda' && React.createElement(Agenda, { D: D, regs: regs, onAdd: add, onUpd: upd, onDel: del, dbs: dbs, rc: RC, onPayX: updX, onUndoX: undoX }),
-                tab === 'proy' && React.createElement(Proyeccion, { D: D, regs: regs, rc: RC }),
                 tab === 'stock' && React.createElement(Stock, { D: D, sc: SC }),
                 tab === 'cal' && React.createElement(Calendario, { D: D, regs: regs, onAdd: add, onUpd: upd, onDel: del }),
                 tab === 'carga' && React.createElement(Form, { type: ft, setType: sFt, D: D, onAdd: add, regs: regs, onDel: del, dbs: dbs, onEdit: editReg, movs: CJ.items }))));
