@@ -343,10 +343,14 @@ function DelBtn({ onDel, l = 'Eliminar', y = 'Sí, eliminar' }) {
 }
 function Cargados({ regs, onDel, onEdit, movs }) {
     const [ed, sEd] = useState(null), [note, sNote] = useState('');
-    const L = [...regs].sort((a, b) => String(b.fc || '').localeCompare(String(a.fc || ''))).slice(0, 25);
+    const [q, sQ] = useState(''), [lim, sLim] = useState(50);
+    const all = [...regs].sort((a, b) => String(b.fc || '').localeCompare(String(a.fc || ''))), qq = q.trim().toLowerCase();
+    const F = qq ? all.filter(r => [r.p, r.c, r.f, r.f ? dmy(r.f) : '', r.t === 'merc' ? 'mercadería' : r.t === 'serv' ? 'servicios' : 'ingreso', r.fp, r.st].join(' ').toLowerCase().includes(qq)) : all;
+    const L = F.slice(0, lim);
     return React.createElement(Card, { t: 'Cargado desde el dashboard (' + regs.length + ')' },
         note && React.createElement("div", { className: "text-sm p-3 rounded-lg mb-3", style: { background: 'var(--gs)', color: 'var(--g)' } }, note),
-        !L.length ? React.createElement("div", { className: "mut text-sm" }, "Todav\u00EDa no cargaste nada desde ac\u00E1.") :
+        regs.length > 8 && React.createElement("input", { className: "inp", style: { width: 320, maxWidth: '100%', marginBottom: 12 }, placeholder: "Buscar por proveedor, concepto, fecha o estado", value: q, onChange: e => { sQ(e.target.value); sLim(50); } }),
+        !L.length ? React.createElement("div", { className: "mut text-sm" }, regs.length ? "No hay resultados para esa b\u00FAsqueda." : "Todav\u00EDa no cargaste nada desde ac\u00E1.") :
             React.createElement("div", { className: "overflow-x-auto" },
                 React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
                     React.createElement("thead", null,
@@ -378,7 +382,8 @@ function Cargados({ regs, onDel, onEdit, movs }) {
                                     React.createElement(DelBtn, { onDel: () => onDel(r.id) })))), ed === r.id && React.createElement("tr", { key: r.id + 'e' },
                             React.createElement("td", { colSpan: "8", style: { background: 'var(--bg)' } },
                                 React.createElement(EditReg, { r: r, movs: movs || [], onEdit: onEdit, onClose: () => sEd(null), onDone: m => { sEd(null); sNote(m); } })))])))),
-        React.createElement("p", { className: "text-xs mut mt-3" }, "Se muestran los \u00FAltimos 25. Pod\u00E9s editar cualquier dato o eliminarlo si cargaste algo por error."));
+        F.length > lim && React.createElement("div", { className: "mt-3" }, React.createElement("button", { className: "btn", onClick: () => sLim(lim + 50) }, "Mostrar 50 m\u00E1s (" + (F.length - lim) + " restantes)")),
+        React.createElement("p", { className: "text-xs mut mt-3" }, "Se muestran " + L.length + " de " + F.length + (qq ? ' (filtrados)' : '') + ". Pod\u00E9s editar cualquier dato o eliminarlo si cargaste algo por error."));
 }
 function Form({ type, setType, D, onAdd, regs, onDel, dbs, onEdit, movs }) {
     const T = { ing: 'Ingreso', merc: 'Salida de mercadería', serv: 'Salida de servicios' };
@@ -474,7 +479,7 @@ const AccBtns = ({ r, act, sAct, onDel }) => React.createElement("span", { class
     React.createElement(DelBtn, { onDel: onDel }));
 const AccPanel = ({ r, act, sAct, onUpd }) => act && act.id === r.id ? (act.m === 'pay' ? React.createElement(PayPanel, { r: r, onUpd: onUpd, onClose: () => sAct(null) }) : React.createElement(MovePanel, { r: r, onUpd: onUpd, onClose: () => sAct(null) })) : null;
 /* ---------- agenda de pagos ---------- */
-function Agenda({ D, regs, onAdd, onUpd, onDel, dbs, rc, onPayX, onUndoX }) {
+function Agenda({ D, regs, onAdd, onUpd, onDel, dbs, rc, onPayX, onUndoX, onAnulX, onRestX, nAnul }) {
     const H = hoy(), HK = ymOf(H);
     const [open, sOpen] = useState(false), [pay, sPay] = useState(null), [selM, sSelM] = useState(null), [err, sErr] = useState('');
     const ag = useMemo(() => pendRows(regs).sort((a, b) => { const x = dueOf(a) || '9999', y = dueOf(b) || '9999'; return x < y ? -1 : x > y ? 1 : 0; }), [regs]);
@@ -592,7 +597,7 @@ function Agenda({ D, regs, onAdd, onUpd, onDel, dbs, rc, onPayX, onUndoX }) {
                         !det.length && React.createElement("tr", null,
                             React.createElement("td", { colSpan: "6", className: "mut" }, "Sin movimientos con tarjeta en este mes."))))),
             React.createElement("p", { className: "text-xs mut mt-3" }, "Mes calendario: cada compra cae en el mes de su fecha de pago. Si es en cuotas, la primera cuota cae en ese mes y las siguientes en los meses que siguen. Cuando pagues el resumen de la tarjeta no lo cargues como salida: ya est\u00E1 contado en cada compra."))),
-        React.createElement(Card, { t: 'Pendientes que ya están en tu Excel (' + xl.length + ')' }, !xl.length ? React.createElement("div", { className: "mut text-sm" }, "No hay pendientes en el Excel.") : React.createElement(React.Fragment, null,
+        React.createElement(Card, { t: 'Pendientes que ya están en tu Excel (' + xl.length + ')' }, !xl.length ? React.createElement("div", { className: "mut text-sm" }, "No hay pendientes en el Excel.", nAnul > 0 && React.createElement("span", null, " Quitaste " + nAnul + (nAnul === 1 ? ' saldo.' : ' saldos.'), " ", React.createElement(DelBtn, { l: "Restaurar", y: "S\u00ED, restaurar", onDel: () => onRestX() }))) : React.createElement(React.Fragment, null,
             React.createElement("div", { className: "overflow-x-auto" },
                 React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
                     React.createElement("thead", null,
@@ -625,6 +630,7 @@ function Agenda({ D, regs, onAdd, onUpd, onDel, dbs, rc, onPayX, onUndoX }) {
                                     r.xo && React.createElement(DelBtn, { l: "Deshacer pagos", y: "S\u00ED, deshacer", onDel: () => onUndoX(r) })))), xp === r.xk && React.createElement("tr", { key: r.xk + 'p' },
                             React.createElement("td", { colSpan: "8", style: { background: 'var(--bg)' } },
                                 React.createElement(PayPanel, { r: { ...r, id: r.xk, t: r.xt, st: 'parcial', xl: true, pagos: (r.xo && r.xo.pagos) || [], fp: 'Sin dato' }, onUpd: async (id, p, cj) => { await onPayX(r, p, cj); }, onClose: () => sXp(null) })))])))),
+            React.createElement("div", { className: "mt-3" }, React.createElement(DelBtn, { l: "Quitar todos los saldos pendientes del Excel", y: "S\u00ED, quitar los " + xl.length, onDel: () => onAnulX(xl) })),
             React.createElement("p", { className: "text-xs mut mt-3" },
                 "Total que falta pagar: ",
                 $(sum(xl, r => r.rs)),
@@ -2840,7 +2846,7 @@ function VentasTodo() {
 }
 /* ================= FINANZAS ================= */
 const FZ_DEF = { mkt: 'MDE, NANO MDE, META', dueno: 'RENZO', win: 6, xa: true, mg: '', fj: '' };
-const FZ_L = { MERC: 'Mercadería', FLETES: 'Fletes y transporte', MKT: 'Marketing (agencia y pauta)', DUENO: 'Sueldo y retiros del dueño', 'G:SUELDOS': 'Sueldos del personal', 'G:HONORARIOS': 'Honorarios (sin marketing)', 'G:ALQUILERES': 'Alquileres', 'G:SERVICIOS': 'Servicios', 'G:IMPUESTOS': 'Impuestos y cargas', 'G:COMISIONES': 'Comisiones', 'G:MANTENIMIENTO': 'Mantenimiento', 'G:RETIRO EXTRAORDINARIO': 'Otros retiros' };
+const FZ_L = { MERC: 'Mercadería', FLETES: 'Fletes y transporte', MKT: 'Marketing (agencia y pauta)', DUENO: 'Sueldo del dueño', RETIRO: 'Retiro de ganancias', 'G:SUELDOS': 'Sueldos del personal', 'G:HONORARIOS': 'Honorarios (sin marketing)', 'G:ALQUILERES': 'Alquileres', 'G:SERVICIOS': 'Servicios', 'G:IMPUESTOS': 'Impuestos y cargas', 'G:COMISIONES': 'Comisiones', 'G:MANTENIMIENTO': 'Mantenimiento', 'G:RETIRO EXTRAORDINARIO': 'Otros retiros' };
 const FZ_P = { DUX: 'DUX (pedidos y sillones)', PDV: 'PDV (local)', 'TIENDA NUBE': 'Tienda Nube (web)' };
 const fzM = n => $M(Math.abs(n) >= 999500 && Math.abs(n) < 1e6 ? (n < 0 ? -1e6 : 1e6) : n);
 const fzL = g => FZ_L[g] || cap(String(g).replace(/^G:/, ''));
@@ -2865,7 +2871,7 @@ const fzEv = (r, bs) => {
 };
 const fzEgr = (D, bs) => { const o = []; [['merc', D.merc], ['serv', D.serv]].forEach(([t, a]) => a.forEach(r => fzEv(r, bs).forEach(e => { if (e.m)
     o.push({ k: e.k, t, c: String(r.c || '').toUpperCase(), p: String(r.p || '').toUpperCase(), m: e.m }); }))); return o; };
-const fzGrp = (e, mk, own) => e.t === 'merc' ? (e.c === 'TRANSPORTE' ? 'FLETES' : 'MERC') : (/^(SUELDOS|RETIRO)/.test(e.c) && own.includes(e.p)) ? 'DUENO' : mk.includes(e.p) ? 'MKT' : 'G:' + e.c;
+const fzGrp = (e, mk, own) => e.t === 'merc' ? (e.c === 'TRANSPORTE' ? 'FLETES' : 'MERC') : (/^(SUELDOS|RETIRO)/.test(e.c) && own.includes(e.p)) ? (/^RETIRO/.test(e.c) ? 'RETIRO' : 'DUENO') : mk.includes(e.p) ? 'MKT' : 'G:' + e.c;
 function fzModel(D, cv, bs) {
     const mk = fzList(cv.mkt), own = fzList(cv.dueno), M = {};
     const mo = k => M[k] || (M[k] = { ven: {}, xa: 0, g: {}, ps: new Set() });
@@ -2895,17 +2901,20 @@ function fzModel(D, cv, bs) {
         o.bruto = o.ventas - o.costo;
         o.op = o.bruto - o.gop + o.xa;
         o.fin = o.op - o.dueno;
+        o.retiro = o.g.RETIRO || 0;
+        o.fin2 = o.fin - o.retiro;
         o.complete = o.ventas > 0;
     });
     return { M, keys };
 }
 const fzSum = (M, ms) => {
-    const t = { ven: 0, xa: 0, costo: 0, merc: 0, fle: 0, gop: 0, dueno: 0, mkt: 0, g: {} };
+    const t = { ven: 0, xa: 0, costo: 0, merc: 0, fle: 0, gop: 0, dueno: 0, retiro: 0, mkt: 0, g: {} };
     ms.forEach(k => { const o = M[k]; if (!o)
-        return; t.ven += o.ventas; t.xa += o.xa; t.costo += o.costo; t.merc += o.merc; t.fle += o.fle; t.gop += o.gop; t.dueno += o.dueno; t.mkt += o.mkt; Object.entries(o.g).forEach(([n, v]) => t.g[n] = (t.g[n] || 0) + v); });
+        return; t.ven += o.ventas; t.xa += o.xa; t.costo += o.costo; t.merc += o.merc; t.fle += o.fle; t.gop += o.gop; t.dueno += o.dueno; t.retiro += o.retiro; t.mkt += o.mkt; Object.entries(o.g).forEach(([n, v]) => t.g[n] = (t.g[n] || 0) + v); });
     t.bruto = t.ven - t.costo;
     t.op = t.bruto - t.gop + t.xa;
     t.fin = t.op - t.dueno;
+    t.fin2 = t.fin - t.retiro;
     return t;
 };
 /* Punto de equilibrio: margen y gastos fijos calculados con los últimos N meses cerrados (o los valores manuales) */
@@ -2963,8 +2972,9 @@ function FzSupuestos({ cf, be, part }) {
     const cls = React.createElement("div", { className: "flex flex-wrap gap-4 items-end" },
         React.createElement(Ctl, { l: "Proveedores que cuentan como marketing (separados por coma)" },
             React.createElement("input", { className: "inp", style: { width: 300 }, value: v.mkt, onChange: e => s({ mkt: e.target.value }) })),
-        React.createElement(Ctl, { l: "Proveedor que es el sueldo del dueño (sueldos y retiros)" },
+        React.createElement(Ctl, { l: "Nombre con el que cargás tus pagos como dueño" },
             React.createElement("input", { className: "inp", style: { width: 220 }, value: v.dueno, onChange: e => s({ dueno: e.target.value }) })));
+    const clsTip = React.createElement(FzTip, null, "Con ese nombre, lo que cargues como SUELDOS se cuenta como tu sueldo (un gasto fijo) y lo que cargues como RETIRO EXTRAORDINARIO se cuenta como retiro de ganancias (no es un costo y no entra en el punto de equilibrio). Los otros SUELDOS son del personal.");
     const bePart = be && React.createElement("div", { className: "flex flex-wrap gap-4 items-end" },
         React.createElement(Ctl, { l: "Meses cerrados para calcular" },
             React.createElement(Seg, { v: +v.win || 6, set: x => s({ win: x }), opts: [[3, '3 meses'], [6, '6 meses'], [12, '12 meses']] })),
@@ -2984,6 +2994,7 @@ function FzSupuestos({ cf, be, part }) {
             React.createElement("h3", { className: "font-semibold", style: { fontSize: 15 } }, "Supuestos editables"),
             cf.err ? React.createElement("span", { className: "text-xs", style: { color: 'var(--r)' } }, cf.err) : React.createElement("span", { className: "text-xs mut" }, "Se guardan en la planilla y valen para todos los usuarios.")),
         cls,
+        clsTip,
         bePart);
 }
 /* ---------- selector de período compartido ---------- */
@@ -3047,10 +3058,12 @@ function EstadoResultados({ model, ms, bs, cf, be, HK }) {
                         row('xa', 'Otros ingresos: XA (incluye alquiler del galp\u00F3n)', o => o.xa, T.xa, { c: 'var(--g)' }),
                         row('ro', 'Resultado operativo (antes del sueldo del due\u00F1o)', o => o.op, T.op, { b: 1, c: 'var(--b)', bg: BG }),
                         row('mo', 'Margen operativo (% de ventas)', o => pv(o.op, o.ventas), pv(T.op, T.ven), { p: 1, i: 1, ind: 1 }),
-                        row('du', 'Sueldo y retiros del due\u00F1o', o => o.dueno, T.dueno, { c: 'var(--o)' }),
-                        row('rf', 'Resultado final del mes', o => o.fin, T.fin, { b: 1, bg: BG }),
+                        row('du', 'Sueldo del due\u00F1o', o => o.dueno, T.dueno, { c: 'var(--o)' }),
+                        row('rf', 'Resultado final del mes (despu\u00E9s del sueldo)', o => o.fin, T.fin, { b: 1, bg: BG }),
+                        row('re', 'Retiro de ganancias del due\u00F1o', o => o.retiro, T.retiro, { c: 'var(--o)' }),
+                        row('rf2', 'Resultado despu\u00E9s de retiros', o => o.fin2, T.fin2, { b: 1, bg: BG }),
                         React.createElement("tr", { key: 'ac' },
-                            React.createElement("td", { style: { position: 'sticky', left: 0, background: BG, fontWeight: 700 } }, "Resultado acumulado"),
+                            React.createElement("td", { style: { position: 'sticky', left: 0, background: BG, fontWeight: 700 } }, "Resultado acumulado (despu\u00E9s del sueldo, antes de retiros)"),
                             ACC.map((v, i) => React.createElement(FzTd, { key: i, v: v, b: true })),
                             React.createElement(FzTd, { v: ACC.length ? ACC[ACC.length - 1] : 0, b: true })))))),
         flagged.length > 0 && React.createElement(FzTip, null,
@@ -3115,7 +3128,7 @@ function PuntoEquilibrio({ model, ms, cf, be, HK }) {
             "Meses bajo el equilibrio en el per\u00EDodo elegido: ",
             bajo.map(r => lab(r.k)).join(', '),
             "."),
-        React.createElement(FzTip, null, "Punto de equilibrio = gastos fijos \u00F7 margen bruto. Los gastos fijos son todo lo que no es mercader\u00EDa ni fletes (marketing, impuestos, servicios, alquiler, sueldos y el sueldo del due\u00F1o). El margen es el real: (ventas - mercader\u00EDa y fletes pagados) \u00F7 ventas, sobre el precio de venta. Se calculan con los \u00FAltimos meses cerrados con ventas cargadas; si escrib\u00EDs un valor a mano, se usa ese."));
+        React.createElement(FzTip, null, "Punto de equilibrio = gastos fijos \u00F7 margen bruto. Los gastos fijos son todo lo que no es mercader\u00EDa ni fletes (marketing, impuestos, servicios, alquiler, sueldos y tu sueldo; no incluyen los retiros de ganancias). El margen es el real: (ventas - mercader\u00EDa y fletes pagados) \u00F7 ventas, sobre el precio de venta. Se calculan con los \u00FAltimos meses cerrados con ventas cargadas; si escrib\u00EDs un valor a mano, se usa ese."));
 }
 /* ---------- análisis ---------- */
 function FzIndicadores({ model, ms }) {
@@ -3197,7 +3210,7 @@ function FzGastos({ D, model, ms, bs, cf }) {
     const { M } = model, T = fzSum(M, ms), set = new Set(ms);
     const E = useMemo(() => fzEgr(D, bs).filter(e => set.has(e.k)), [D, bs, ms.join()]);
     const pv = x => T.ven > 0 ? x / T.ven : NaN;
-    const names = ['MERC', 'FLETES', ...Object.keys(T.g).filter(n => fzIsOp(n) || n === 'DUENO').sort((a, b) => (a === 'MKT' ? -1 : b === 'MKT' ? 1 : T.g[b] - T.g[a]))].filter(n => Math.abs(T.g[n] || 0) > 0.5);
+    const names = ['MERC', 'FLETES', ...Object.keys(T.g).filter(n => fzIsOp(n) || n === 'DUENO' || n === 'RETIRO').sort((a, b) => (a === 'MKT' ? -1 : b === 'MKT' ? 1 : T.g[b] - T.g[a]))].filter(n => Math.abs(T.g[n] || 0) > 0.5);
     const tot = sum(names, n => T.g[n] || 0), mer = E.filter(e => e.t === 'merc'), mt = sum(mer, e => e.m);
     const bp = by(mer.map(e => ({ ...e, p: e.p || 'SIN PROVEEDOR' })), 'p', e => e.m), tp = i => sum(bp.slice(0, i), x => x.value) / (mt || 1);
     const sp = by(E.filter(e => e.t === 'serv'), 'p', e => e.m);
@@ -3205,7 +3218,7 @@ function FzGastos({ D, model, ms, bs, cf }) {
     return React.createElement("div", { className: "space-y-4" },
         React.createElement("div", { className: "grid gap-4 grid-cols-1 lg:grid-cols-2" },
             React.createElement(Card, { t: "Cada rubro (monto y % de las ventas)" },
-                React.createElement(HBars, { max: 14, fmt: fm('v', T.ven), items: names.map(n => ({ name: fzL(n), value: T.g[n] || 0, color: n === 'MERC' || n === 'FLETES' ? 'var(--o)' : n === 'DUENO' ? 'var(--b)' : 'var(--r)' })) })),
+                React.createElement(HBars, { max: 14, fmt: fm('v', T.ven), items: names.map(n => ({ name: fzL(n), value: T.g[n] || 0, color: n === 'MERC' || n === 'FLETES' ? 'var(--o)' : (n === 'DUENO' || n === 'RETIRO') ? 'var(--b)' : 'var(--r)' })) })),
             React.createElement(Card, { t: "Mercader\u00EDa por proveedor (monto y % de la mercader\u00EDa)" },
                 React.createElement(HBars, { max: 10, fmt: fm('m', mt), color: "var(--o)", items: bp }))),
         React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))' } },
@@ -3259,7 +3272,7 @@ function FzCaja({ D, regs, CT, CJ, SC, be }) {
             React.createElement(Kpi, { l: "Saldo libre", v: fzM(libre), c: libre < 0 ? 'var(--r)' : 'var(--g)', s: "Saldo menos comprometido" }),
             React.createElement(Kpi, { l: "D\u00EDas que cubre el saldo", v: dias(total) == null ? '–' : dias(total) + ' d\u00EDas', c: "var(--b)", s: 'Solo gastos fijos de ' + fzM(be.fj) + ' por mes, sin vender nada' }),
             React.createElement(Kpi, { l: "D\u00EDas con el saldo libre", v: dias(libre) == null ? '–' : dias(libre) + ' d\u00EDas', c: libre < 0 ? 'var(--r)' : 'var(--b)', s: "Despu\u00E9s de pagar lo comprometido" })),
-        React.createElement(FzTip, null, "Los gastos fijos son los del Punto de equilibrio (", be.manFj ? 'manuales' : 'calculados', ", ", be.fj ? $(be.fj) : '$0', " por mes, ", $(dia), " por d\u00EDa). Incluyen tu sueldo y descuentan lo que cobr\u00E1s de XA si est\u00E1 tildado."),
+        React.createElement(FzTip, null, "Los gastos fijos son los del Punto de equilibrio (", be.manFj ? 'manuales' : 'calculados', ", ", be.fj ? $(be.fj) : '$0', " por mes, ", $(dia), " por d\u00EDa). Incluyen tu sueldo (no los retiros de ganancias) y descuentan lo que cobr\u00E1s de XA si est\u00E1 tildado."),
         React.createElement("section", { className: "card p-4 space-y-4" },
             React.createElement("h3", { className: "font-semibold", style: { fontSize: 15 } }, "Simulador: \u00BFqu\u00E9 pasa si cambia...?"),
             React.createElement("div", { className: "flex flex-wrap gap-5 items-end" },
@@ -3356,6 +3369,14 @@ function App() {
         if (cj)
             await CJ.add(mkMov(cj, { t: r.xt, p: r.p, c: r.c }, id));
     };
+    const anulX = async (rows) => { for (const r of rows) {
+        if (r.xo)
+            await PX.upd(r.xo.id, { anul: true });
+        else
+            await PX.add({ key: r.xk, t: r.xt, rs0: r.rs, pagos: [], anul: true, fc: new Date().toISOString() });
+    } };
+    const restX = async () => { for (const o of PX.items.filter(o => o.anul))
+        await PX.upd(o.id, { anul: false }); };
     const undoX = async (r) => { if (!r.xo)
         return; await PX.del(r.xo.id); for (const m of CJ.items.filter(x => x.rid === r.xo.id))
         await CJ.del(m.id); };
@@ -3384,8 +3405,14 @@ function App() {
             const key = k0 + '#' + cnt[k0], o = ovm[key];
             let x = { ...r, xk: key, xt: t };
             if (o && r.rs > 0.5 && Math.abs((+o.rs0 || 0) - r.rs) < 0.5) {
-                const rs = Math.max(0, r.rs - sum(o.pagos || [], q => q.m));
-                x = { ...x, rs, pg: r.mt - rs, e: rs < 0.5 ? 'OK' : 'EN PROCESO', xo: o };
+                if (o.anul) {
+                    const pg = r.pg + sum(o.pagos || [], q => q.m);
+                    x = { ...x, mt: pg, pg, rs: 0, e: 'OK', xo: o };
+                }
+                else {
+                    const rs = Math.max(0, r.rs - sum(o.pagos || [], q => q.m));
+                    x = { ...x, rs, pg: r.mt - rs, e: rs < 0.5 ? 'OK' : 'EN PROCESO', xo: o };
+                }
             }
             return x;
         });
@@ -3456,7 +3483,7 @@ function App() {
                 tab === 'prov' && React.createElement(ProvComp, { D: D }),
                 tab === 'fin' && React.createElement(Finanzas, { D: D, regs: regs, rc: RC, CT: CT, CJ: CJ, SC: SC, CF: CF }),
                 tab === 'caja' && React.createElement(Caja, { D: D, regs: regs, CT: CT, CJ: CJ, SC: SC, go: sTab }),
-                tab === 'agenda' && React.createElement(Agenda, { D: D, regs: regs, onAdd: add, onUpd: upd, onDel: del, dbs: dbs, rc: RC, onPayX: updX, onUndoX: undoX }),
+                tab === 'agenda' && React.createElement(Agenda, { D: D, regs: regs, onAdd: add, onUpd: upd, onDel: del, dbs: dbs, rc: RC, onPayX: updX, onUndoX: undoX, onAnulX: anulX, onRestX: restX, nAnul: PX.items.filter(o => o.anul).length }),
                 tab === 'stock' && React.createElement(Stock, { D: D, sc: SC }),
                 tab === 'cal' && React.createElement(Calendario, { D: D, regs: regs, onAdd: add, onUpd: upd, onDel: del }),
                 tab === 'carga' && React.createElement(Form, { type: ft, setType: sFt, D: D, onAdd: add, regs: regs, onDel: del, dbs: dbs, onEdit: editReg, movs: CJ.items }))));
