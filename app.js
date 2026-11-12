@@ -2547,6 +2547,7 @@ function Ventas() {
     const [msg, sMsg] = useState(''), [man, sMan] = useState(false), [from, sF] = useState(null), [to, sT] = useState(null), [ca, sCa] = useState('all'), [fp, sFp] = useState('all'), [rb, sRb] = useState('all'), [met, sMet] = useState('n');
     useEffect(() => { try {
         __KV.set('ruma_ventas', JSON.stringify(st));
+        window.dispatchEvent(new Event('ruma-ventas'));
     }
     catch (e) { } }, [st]);
     const all = useMemo(() => { const ids = new Set(st.lines.map(l => l.id)); return [...VD.lines.filter(l => !ids.has(l.id)), ...st.lines]; }, [st.lines]);
@@ -3396,6 +3397,8 @@ function App() {
     catch (e) {
         return null;
     } });
+    const [kvv, sKvv] = useState(0);
+    useEffect(() => { const h = () => sKvv(x => x + 1); window.addEventListener('ruma-ventas', h); return () => window.removeEventListener('ruma-ventas', h); }, []);
     const D = useMemo(() => {
         const ovm = {}, cnt = {};
         PX.items.forEach(o => { ovm[o.key] = o; });
@@ -3420,8 +3423,21 @@ function App() {
         regs.forEach(r => { if (!o[r.t])
             return; if (r.t !== 'ing' && !/^\d{4}-\d{2}-\d{2}$/.test(r.f || ''))
             return; o[r.t].push(regRow(r)); });
+        /* Ingresos calculados desde las ventas importadas (Tienda Nube y local): solo meses/canales sin ingreso cargado a mano. No tocan Caja. */
+        try {
+            const stv = JSON.parse(__KV.get('ruma_ventas')) || { lines: [] }, mine = stv.lines || [];
+            if (mine.length) {
+                const ids = new Set(mine.map(l => l.id)), canal = l => l.ca === 'Web' ? 'TIENDA NUBE' : 'PDV', kk = l => ym(+l.f.slice(0, 4), +l.f.slice(5, 7)) + '|' + canal(l);
+                const have = new Set(o.ing.map(r => ym(r.y, r.mes) + '|' + r.p)), act = new Set(mine.map(kk)), agg = {};
+                [...VD.lines.filter(l => !ids.has(l.id)), ...mine].forEach(l => { const key = kk(l); if (have.has(key) || !act.has(key))
+                    return; const g = agg[key] = agg[key] || { y: +l.f.slice(0, 4), mes: +l.f.slice(5, 7), p: canal(l), mt: 0 }; g.mt += +l.n || 0; });
+                Object.values(agg).forEach(g => { if (g.mt > 0)
+                    o.ing.push({ ...g, mt: Math.round(g.mt), k: ym(g.y, g.mes) * 100, der: true }); });
+            }
+        }
+        catch (e) { }
         return o;
-    }, [regs, PX.items]);
+    }, [regs, PX.items, kvv]);
     const go = t => { sFt(t); sTab('carga'); };
     const f = a => year === 'all' ? a : a.filter(r => r.y === +year);
     const TABS = [['gen', 'Visión general', 'home'], ['ing', 'Ingresos', 'trend'], ['vta', 'Ventas', 'bag'], ['merc', 'Salida de mercadería', 'box'], ['serv', 'Salida de servicios', 'wrench'], ['caja', 'Caja', 'wallet'], ['agenda', 'Agenda de pagos', 'bell'], ['cal', 'Calendario', 'calendar'], ['prov', 'Comparar proveedores', 'scale'], ['fin', 'Finanzas', 'cash'], ['stock', 'Stock valorizado', 'layers'], ['carga', 'Cargar datos', 'plus']];
@@ -3463,6 +3479,7 @@ function App() {
                             React.createElement(Donut, { items: by(f(D.ing), 'p', r => r.mt) })),
                         React.createElement(Card, { t: "Ingresos por mes" },
                             React.createElement(HBars, { color: "var(--g)", max: 12, items: by(f(D.ing), 'k', r => r.mt).sort((a, b) => b.name - a.name).map(x => ({ name: lab(Math.floor(+x.name / 100)), value: x.value })) }))),
+                    D.ing.some(r => r.der) && React.createElement("p", { className: "text-xs mut" }, "Calculado desde las ventas importadas (neto cobrado, sin env\u00EDo; no se registra en Caja): " + D.ing.filter(r => r.der).sort((x, z) => x.k - z.k).map(r => lab(ym(r.y, r.mes)) + ' ' + r.p + ' ' + $(r.mt)).join(' \u00B7 ') + ". Si carg\u00E1s el ingreso de ese mes a mano, reemplaza al calculado."),
                     tb('ing', 'p', 'Plataforma', 'Nuevo ingreso'),
                     React.createElement("p", { className: "text-xs mut" }, "DUX sale de la planilla de DUX (suma por fecha de comprobante, todo cobrado). Antes del 17/08/2024 sale de CONSOLIDADO VENTAS. XA, PDV y Tienda Nube vienen de tu hoja INGRESOS.")),
                 tab === 'merc' && React.createElement("div", { className: "space-y-4" },
