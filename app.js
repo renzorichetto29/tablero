@@ -39,7 +39,7 @@ const base = {
     merc: prep(RAW.merc), serv: prep(RAW.serv),
     ing: RAW.ing.map(r => ({ ...r, k: ym(r.y, r.mes) * 100 }))
 };
-const PLAT = ['CRM', 'PDV', 'TIENDA NUBE', 'XA', 'DUX'];
+const PLAT = ['CRM', 'PDV', 'TIENDA NUBE', 'XA'];
 const CMERC = ['SILLONES', 'MUEBLES', 'TRANSPORTE', 'DECO', 'TEXTIL', 'AROMAS', 'INSUMOS', 'OTROS'];
 const CSERV = ['SUELDOS', 'RETIRO EXTRAORDINARIO', 'SERVICIOS', 'IMPUESTOS', 'HONORARIOS', 'ALQUILERES', 'COMISIONES', 'MANTENIMIENTO'];
 const EST = ['OK', 'PENDIENTE', 'EN PROCESO'];
@@ -2265,7 +2265,7 @@ function Flujo({ D }) {
             React.createElement(Kpi, { l: "Saldo final", v: $M(fin), c: fin < 0 ? 'var(--r)' : 'var(--b)', s: neg + ' de ' + ms.length + ' meses en negativo' })),
         React.createElement(Card, { t: "Flujo de caja mensual" },
             React.createElement(GBars, { labels: ms.map(lab), series: [{ name: 'Ingresos', color: 'var(--g)', vals: I }, { name: 'Egresos', color: 'var(--o)', vals: E }], line: ln === 'acc' ? ACC : N, lineName: ln === 'acc' ? 'Saldo acumulado' : 'Resultado del mes' }),
-            React.createElement("div", { className: "text-xs mut mt-2" }, "Septiembre 2026 tiene solo DUX: faltan XA, PDV y Tienda Nube. Octubre 2026 no tiene ingresos cargados porque el mes no cerr\u00F3, por eso sale negativo.")),
+            React.createElement("div", { className: "text-xs mut mt-2" }, "Septiembre 2026 tiene solo CRM: faltan XA, PDV y Tienda Nube. Un mes sin ingresos cargados (ni calculados desde ventas importadas) sale negativo porque todav\u00EDa no cerr\u00F3.")),
         React.createElement("section", { className: "card" },
             React.createElement("div", { className: "overflow-x-auto", style: { maxHeight: 560 } },
                 React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
@@ -2318,7 +2318,7 @@ function Comp({ D }) {
                         React.createElement(V, { v: t.E, c: "var(--o)" }),
                         React.createElement(V, { v: t.N, b: true }),
                         React.createElement("td", { className: "num text-right" }, t.I ? Math.round(t.N / t.I * 100) + '%' : '–')); }))))),
-        React.createElement("p", { className: "text-xs mut" }, "Los ingresos DUX salen de la planilla de DUX por fecha de comprobante, todo cobrado. 2024 arranca en marzo (egresos) y mayo (ingresos). 2026 tiene egresos de septiembre y octubre; los ingresos de septiembre est\u00E1n incompletos (solo DUX) y los de octubre no est\u00E1n cargados."));
+        React.createElement("p", { className: "text-xs mut" }, "Los ingresos CRM (antes DUX) salen de la planilla de DUX y, desde que usás el CRM, de las ventas que importes, por fecha de comprobante, todo cobrado. 2024 arranca en marzo (egresos) y mayo (ingresos). 2026 tiene egresos de septiembre y octubre; los ingresos de septiembre est\u00E1n incompletos (solo CRM) y los de octubre no est\u00E1n cargados."));
 }
 const PAL = ['#2563d6', '#0f8a5f', '#d9480f', '#7c5cd6', '#0e9aa7', '#c92a2a', '#b7791f', '#d6409f'];
 const DIAS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
@@ -2732,26 +2732,127 @@ function VentasTab({ D }) {
     const [s, sS] = useState('dux');
     return React.createElement("div", { className: "space-y-4" },
         React.createElement("div", { className: "flex flex-wrap items-center gap-3" },
-            React.createElement(Seg, { v: s, set: sS, opts: [['dux', 'DUX (pedidos)'], ['tn', 'Tienda Nube y local'], ['all', 'Todo junto']] }),
-            React.createElement("span", { className: "text-sm mut" }, s === 'dux' ? 'Una fila por comprobante de venta. Todo cobrado.' : s === 'tn' ? 'Detalle por producto: rubro, forma de pago, día y horario.' : 'Suma de las dos fuentes por mes y canal.')),
+            React.createElement(Seg, { v: s, set: sS, opts: [['dux', 'CRM (pedidos)'], ['tn', 'Tienda Nube y local'], ['all', 'Todo junto']] }),
+            React.createElement("span", { className: "text-sm mut" }, s === 'dux' ? 'Una fila por comprobante de venta (historial de DUX y ventas importadas del CRM). Todo cobrado.' : s === 'tn' ? 'Detalle por producto: rubro, forma de pago, día y horario.' : 'Suma de las dos fuentes por mes y canal.')),
         s === 'tn' ? React.createElement(Ventas, null) : s === 'dux' ? React.createElement(VentasDux, { D: D }) : React.createElement(VentasTodo, null));
 }
+/* ================= CRM: importar ventas (no toca Caja) ================= */
+const crmGet = () => { try {
+    return (JSON.parse(__KV.get('ruma_crm')) || {}).orders || [];
+}
+catch (e) {
+    return [];
+} };
+const crmKey = o => o.f + '|' + o.cl + '|' + Math.round(o.tot);
+const crmRows = orders => {
+    const seen = new Set(DXR.map(crmKey));
+    return orders.filter(o => !seen.has(crmKey(o))).map(o => { const [y, m, d] = o.f.split('-').map(Number), t = o.t || '12:00'; return { c: String(o.id), f: o.f, t, cl: o.cl, tot: o.tot, cob: o.tot, env: o.env || 0, dias: 0, v: o.v || 'Sin vendedor', est: o.est, y, mes: m, k: +o.f.replace(/-/g, ''), h: +t.slice(0, 2), wd: (new Date(y, m - 1, d).getDay() + 6) % 7, sd: 0, tc: o.cl === 'CONSUMIDOR FINAL' ? 'Consumidor final' : 'Cliente con nombre', crm: true }; });
+};
+const parseCRM = text => {
+    const t = text.replace(/^﻿/, ''), first = t.split('\n')[0], sep = (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ';' : ',', R = parseCSV(t, sep), hd = (R[0] || []).map(x => String(x).trim()), ix = n => hd.indexOf(n);
+    const I = { id: ix('Número de orden'), f: ix('Fecha'), est: ix('Estado de la orden'), sub: ix('Subtotal de productos'), des: ix('Descuento'), env: ix('Costo de envío'), tot: ix('Total'), ca: ix('Canal'), mp: ix('Medio de pago'), fp: ix('Forma de pago'), cu: ix('Cantidad de cuotas'), cl: ix('Nombre del comprador'), v: ix('Vendedor'), p: ix('Nombre del producto'), pr: ix('Precio del producto'), q: ix('Cantidad del producto'), sku: ix('SKU') };
+    if (I.id < 0 || I.f < 0 || I.tot < 0)
+        return { err: 'No reconozco las columnas del archivo. Tiene que ser la exportación de ventas del CRM (con Número de orden, Fecha y Total).', orders: [], skip: {} };
+    const orders = [], skip = {};
+    let o = null;
+    R.slice(1).forEach(r => {
+        const id = String(r[I.id] || '').trim();
+        if (!id)
+            return;
+        if (r[I.f]) {
+            const m = String(r[I.f]).match(/(\d\d)\/(\d\d)\/(\d{4})(?:\s+(\d\d):(\d\d))?/), est = String(r[I.est] || '').trim();
+            if (!m) {
+                o = null;
+                return;
+            }
+            if (!/entregad|confirmad/i.test(est)) {
+                skip[est || 'Sin estado'] = (skip[est || 'Sin estado'] || 0) + 1;
+                o = null;
+                return;
+            }
+            const sub = num(r[I.sub]), des = num(r[I.des]), env = num(r[I.env]), tot = num(r[I.tot]) || (sub - des + env);
+            o = { id, f: m[3] + '-' + m[2] + '-' + m[1], t: m[4] ? m[4] + ':' + m[5] : '12:00', est, sub, des, env, tot, ca: String(r[I.ca] || ''), mp: String(r[I.mp] || ''), fp: String(r[I.fp] || ''), cu: num(r[I.cu]), cl: String(r[I.cl] || '').trim().toUpperCase() || 'SIN NOMBRE', v: String(r[I.v] || '').trim(), it: [] };
+            orders.push(o);
+        }
+        if (o && o.id === id && r[I.p])
+            o.it.push({ p: String(r[I.p]).slice(0, 90), sku: String(r[I.sku] || ''), q: num(r[I.q]), pr: num(r[I.pr]) });
+    });
+    return { orders, skip };
+};
+function CrmImport() {
+    const [msg, sMsg] = useState(null), [n, sN] = useState(() => crmGet().length);
+    const save = list => { __KV.set('ruma_crm', JSON.stringify({ orders: list })); window.dispatchEvent(new Event('ruma-crm')); sN(list.length); };
+    const imp = async (e) => {
+        const f = e.target.files[0];
+        e.target.value = '';
+        if (!f)
+            return;
+        try {
+            const buf = await f.arrayBuffer();
+            let tx;
+            try {
+                tx = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+            }
+            catch (e2) {
+                tx = new TextDecoder('windows-1252').decode(buf);
+            }
+            const P = parseCRM(tx);
+            if (P.err) {
+                sMsg({ bad: 1, t: P.err });
+                return;
+            }
+            if (!P.orders.length) {
+                sMsg({ bad: 1, t: 'No encontré órdenes entregadas o confirmadas en el archivo.' });
+                return;
+            }
+            const cur = crmGet(), idx = {};
+            cur.forEach(o => idx[o.id] = o);
+            let nw = 0, up = 0;
+            P.orders.forEach(o => { if (idx[o.id])
+                up++;
+            else
+                nw++; idx[o.id] = o; });
+            const list = Object.values(idx).sort((a, b) => a.f < b.f ? -1 : a.f > b.f ? 1 : 0);
+            save(list);
+            const dup = P.orders.length - crmRows(P.orders).length, sk = Object.entries(P.skip);
+            sMsg({ t: 'Se leyeron ' + P.orders.length + ' órdenes: ' + nw + ' nuevas y ' + up + ' ya importadas (actualizadas).' + (dup ? ' ' + dup + (dup === 1 ? ' ya estaba' : ' ya estaban') + ' en el historial de DUX y no se duplica.' : '') + (sk.length ? ' Se salteó por su estado: ' + sk.map(([k, v]) => k + ' (' + v + ')').join(', ') + '.' : '') + ' No se modificó ninguna caja.' });
+        }
+        catch (err) {
+            sMsg({ bad: 1, t: 'No se pudo leer el archivo: ' + ((err && err.message) || 'error') });
+        }
+    };
+    return React.createElement("section", { className: "card p-4 space-y-3" },
+        React.createElement("div", { className: "flex flex-wrap gap-3 items-center" },
+            React.createElement("label", { className: "btn p", style: { cursor: 'pointer' } },
+                React.createElement(Icon, { n: "plus", s: 16 }),
+                "Importar ventas del CRM (CSV)",
+                React.createElement("input", { type: "file", accept: ".csv,text/csv", onChange: imp, style: { display: 'none' } })),
+            n > 0 && React.createElement(DelBtn, { l: "Quitar las ventas importadas", y: "Sí, quitar las " + n, onDel: async () => { save([]); sMsg({ t: 'Se quitaron las ventas importadas del CRM.' }); } }),
+            React.createElement("span", { className: "text-sm mut" }, n ? n + ' órdenes importadas.' : 'Todavía no importaste ventas del CRM.')),
+        msg && React.createElement("div", { className: "text-sm p-3 rounded-lg", style: { background: msg.bad ? 'var(--rs)' : 'var(--gs)', color: msg.bad ? 'var(--r)' : 'var(--g)' } }, msg.t),
+        React.createElement("p", { className: "text-xs mut" }, "Importan las órdenes entregadas y confirmadas, por el total. Si volvés a importar una orden, se actualiza (no se duplica). Estas ventas cuentan en Ingresos y en las estadísticas, pero no mueven ninguna caja. Si el mes ya tiene un ingreso CRM cargado a mano, se usa ese."));
+}
+
 function VentasDux({ D }) {
-    const keys = useMemo(() => [...new Set(DXR.map(r => ym(r.y, r.mes)))].sort(), []);
+    const [cv, sCv] = useState(0);
+    useEffect(() => { const h = () => sCv(x => x + 1); window.addEventListener('ruma-crm', h); return () => window.removeEventListener('ruma-crm', h); }, []);
+    const RR = useMemo(() => [...DXR, ...crmRows(crmGet())], [cv]);
+    const keys = useMemo(() => [...new Set(RR.map(r => ym(r.y, r.mes)))].sort(), [RR]);
     const [from, sF] = useState(null), [to, sT] = useState(null), [vd, sV] = useState('all'), [tc, sTc] = useState('all'), [met, sM] = useState('tot');
     const f0 = from ?? keys[0], t0 = to ?? keys[keys.length - 1], ms = keys.filter(k => k >= f0 && k <= t0);
-    const fr = useMemo(() => DXR.filter(r => { const k = ym(r.y, r.mes); return k >= f0 && k <= t0 && (vd === 'all' || r.v === vd) && (tc === 'all' || r.tc === tc); }), [f0, t0, vd, tc]);
+    const fr = useMemo(() => RR.filter(r => { const k = ym(r.y, r.mes); return k >= f0 && k <= t0 && (vd === 'all' || r.v === vd) && (tc === 'all' || r.tc === tc); }), [f0, t0, vd, tc, RR]);
     const F = sum(fr, r => r.tot), N = fr.length, mx = fr.reduce((a, r) => r.tot > (a ? a.tot : 0) ? r : a, null);
     const vf = r => met === 'tot' ? r.tot : 1, fm = met === 'n' ? (v => String(Math.round(v))) : $, fa = met === 'n' ? (v => String(Math.round(v))) : $M;
     const bk = (kf, order, rs = fr) => order.map(k => sum(rs.filter(r => kf(r) === k), vf));
-    const vends = [...new Set(DXR.map(r => r.v))].sort();
+    const vends = [...new Set(RR.map(r => r.v))].sort();
     const hrs = [];
     for (let h = Math.min(9, ...fr.map(r => r.h)); h <= Math.max(20, ...fr.map(r => r.h)); h++)
         hrs.push(h);
     const hm = DIAS.map((_, d) => hrs.map(h => sum(fr.filter(r => r.wd === d && r.h === h), vf))), hmx = Math.max(1, ...hm.flat());
-    const conc = ms.map(k => ({ k, F: sum(DXR.filter(r => ym(r.y, r.mes) === k), r => r.tot), O: OLDDUX[k] || 0 }));
+    const conc = ms.map(k => ({ k, F: sum(RR.filter(r => ym(r.y, r.mes) === k), r => r.tot), O: OLDDUX[k] || 0 }));
     const cols = [{ k: 'f', l: 'Fecha', t: 'd' }, { k: 'c', l: 'Comprobante' }, { k: 'cl', l: 'Cliente' }, { k: 'v', l: 'Vendedor' }, { k: 'tot', l: 'Total', t: '$', col: 'var(--g)' }];
     return React.createElement("div", { className: "space-y-4" },
+        React.createElement(CrmImport, null),
         React.createElement("section", { className: "card p-4 space-y-3" },
             React.createElement("div", { className: "flex flex-wrap gap-4 items-end" },
                 React.createElement(MonthSel, { keys: keys, from: f0, to: t0, sF: sF, sT: sT }),
@@ -2768,11 +2869,11 @@ function VentasDux({ D }) {
                     React.createElement(Seg, { v: met, set: sM, opts: [['tot', 'Ventas $'], ['n', 'Comprobantes']] }))),
             React.createElement(PresetBar, { keys: keys, from: f0, to: t0, set: (a, b) => { sF(a); sT(b); } })),
         React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))' } },
-            React.createElement(Kpi, { l: "Ventas DUX", v: $M(F), c: "var(--g)", s: $(F) + ' · todo cobrado' }),
+            React.createElement(Kpi, { l: "Ventas CRM", v: $M(F), c: "var(--g)", s: $(F) + ' · todo cobrado' }),
             React.createElement(Kpi, { l: "Comprobantes", v: N, c: "var(--b)", s: "En el per\u00EDodo elegido" }),
             React.createElement(Kpi, { l: "Ticket promedio", v: $M(N ? F / N : 0), c: "var(--b)", s: "Venta por comprobante" }),
             React.createElement(Kpi, { l: "Mayor venta", v: $M(mx ? mx.tot : 0), c: "var(--b)", s: mx ? mx.cl + ' · ' + dmy(mx.f) : '' })),
-        React.createElement(Card, { t: "Ventas DUX por mes" },
+        React.createElement(Card, { t: "Ventas CRM por mes" },
             React.createElement(GBars, { labels: ms.map(lab), fm: fm, fa: fa, series: [{ name: met === 'tot' ? 'Ventas' : 'Comprobantes', color: 'var(--g)', vals: ms.map(k => sum(fr.filter(r => ym(r.y, r.mes) === k), vf)) }] })),
         React.createElement(Card, { t: "Comprobantes por mes y vendedor" },
             React.createElement(GBars, { labels: ms.map(lab), fm: v => String(Math.round(v)), fa: v => String(Math.round(v)), series: vends.map((v, i) => ({ name: v, color: PAL[i], vals: ms.map(k => fr.filter(r => ym(r.y, r.mes) === k && r.v === v).length) })) })),
@@ -2801,14 +2902,14 @@ function VentasDux({ D }) {
                     React.createElement("tbody", null, DIAS.map((d, i) => React.createElement("tr", { key: d },
                         React.createElement("td", { className: "mut text-sm", style: { border: 0, padding: '2px 8px 2px 0' } }, d),
                         hm[i].map((v, j) => React.createElement("td", { key: j, title: d + ' ' + hrs[j] + ' h: ' + fm(v), style: { border: 0, minWidth: 44, height: 34, textAlign: 'center', fontSize: 11, borderRadius: 6, padding: 2, background: v ? `color-mix(in srgb, var(--b) ${Math.max(10, Math.round(v / hmx * 90))}%, var(--card))` : 'var(--bg)', color: v / hmx > .55 ? '#fff' : 'var(--ink)' } }, v ? fa(v) : ''))))))),
-            React.createElement("div", { className: "text-xs mut mt-2" }, "La hora es la de registro del comprobante en DUX.")),
-        React.createElement(Card, { t: "DUX real vs. tu hoja INGRESOS de hoy" },
+            React.createElement("div", { className: "text-xs mut mt-2" }, "La hora es la de registro del comprobante en DUX. Las ventas importadas del CRM no traen hora real (figuran a las 12:00), as\u00ED que suman en esa franja.")),
+        React.createElement(Card, { t: "CRM (antes DUX) vs. tu hoja INGRESOS de hoy" },
             React.createElement("div", { className: "overflow-x-auto", style: { maxHeight: 320 } },
                 React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
                     React.createElement("thead", null,
                         React.createElement("tr", null,
                             React.createElement("th", null, "Mes"),
-                            React.createElement("th", { className: "text-right" }, "DUX (planilla)"),
+                            React.createElement("th", { className: "text-right" }, "CRM / DUX (planilla)"),
                             React.createElement("th", { className: "text-right" }, "Tu hoja INGRESOS"),
                             React.createElement("th", { className: "text-right" }, "Diferencia"))),
                     React.createElement("tbody", null, conc.map(x => React.createElement("tr", { key: x.k },
@@ -2819,16 +2920,19 @@ function VentasDux({ D }) {
             React.createElement("div", { className: "text-xs mut mt-2" }, "Las f\u00F3rmulas de las filas DUX de 2024-2025 en tu hoja apuntaban a otra fila, por eso los meses estaban corridos. Desde enero 2026 coinciden. En el dashboard, agosto 2024 suma adem\u00E1s $341.100 de ventas del 1 al 16/08, anteriores a DUX.")),
         React.createElement("h3", { className: "font-semibold", style: { fontSize: 15 } }, "Todos los comprobantes"),
         React.createElement(Table, { rows: fr, cols: cols, cat: "v", catL: "Vendedor", init: "all" }),
-        React.createElement("p", { className: "text-xs mut" }, "Fuente: consulta de ventas de DUX (734 comprobantes, 17/08/2024 a 02/10/2026). Todo se toma como cobrado y se ubica en el mes de la fecha del comprobante. La planilla no trae productos, rubros ni formas de pago."));
+        React.createElement("p", { className: "text-xs mut" }, "Fuente: consulta de ventas de DUX (734 comprobantes, 17/08/2024 a 02/10/2026) m\u00E1s las ventas que importes del CRM. Todo se toma como cobrado y se ubica en el mes de la fecha del comprobante. La planilla no trae productos, rubros ni formas de pago."));
 }
 function VentasTodo() {
+    const [cv, sCv] = useState(0);
+    useEffect(() => { const h = () => sCv(x => x + 1); window.addEventListener('ruma-crm', h); return () => window.removeEventListener('ruma-crm', h); }, []);
+    const RR = useMemo(() => [...DXR, ...crmRows(crmGet())], [cv]);
     const tn = useMemo(() => { let st = { lines: [] }; try {
         st = JSON.parse(__KV.get('ruma_ventas')) || st;
     }
     catch (e) { } const ids = new Set(st.lines.map(l => l.id)); return [...VD.lines.filter(l => !ids.has(l.id)), ...st.lines].map(l => ({ ...l, k: ym(+l.f.slice(0, 4), +l.f.slice(5, 7)) })); }, []);
-    const keys = useMemo(() => [...new Set([...tn.map(r => r.k), ...DXR.map(r => ym(r.y, r.mes))])].sort(), [tn]);
+    const keys = useMemo(() => [...new Set([...tn.map(r => r.k), ...RR.map(r => ym(r.y, r.mes))])].sort(), [tn, RR]);
     const [from, sF] = useState(null), [to, sT] = useState(null), f0 = from ?? keys[0], t0 = to ?? keys[keys.length - 1], ms = keys.filter(k => k >= f0 && k <= t0);
-    const T = tn.filter(r => r.k >= f0 && r.k <= t0), X = DXR.filter(r => { const k = ym(r.y, r.mes); return k >= f0 && k <= t0; });
+    const T = tn.filter(r => r.k >= f0 && r.k <= t0), X = RR.filter(r => { const k = ym(r.y, r.mes); return k >= f0 && k <= t0; });
     const a = ms.map(k => sum(X.filter(r => ym(r.y, r.mes) === k), r => r.tot)), b = ms.map(k => sum(T.filter(r => r.k === k), r => r.n)), A = sum(a, x => x), B = sum(b, x => x);
     return React.createElement("div", { className: "space-y-4" },
         React.createElement("section", { className: "card p-4 space-y-3" },
@@ -2837,18 +2941,18 @@ function VentasTodo() {
             React.createElement(PresetBar, { keys: keys, from: f0, to: t0, set: (x, z) => { sF(x); sT(z); } })),
         React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))' } },
             React.createElement(Kpi, { l: "Ventas totales", v: $M(A + B), c: "var(--g)", s: $(A + B) }),
-            React.createElement(Kpi, { l: "DUX (pedidos)", v: $M(A), c: "var(--b)", s: (A + B ? Math.round(A / (A + B) * 100) : 0) + '% del total' }),
+            React.createElement(Kpi, { l: "CRM (pedidos)", v: $M(A), c: "var(--b)", s: (A + B ? Math.round(A / (A + B) * 100) : 0) + '% del total' }),
             React.createElement(Kpi, { l: "Tienda Nube y local", v: $M(B), c: "var(--g)", s: (A + B ? Math.round(B / (A + B) * 100) : 0) + '% del total · neto sin envío' })),
         React.createElement(Card, { t: "Ventas por mes y fuente" },
-            React.createElement(GBars, { labels: ms.map(lab), series: [{ name: 'DUX', color: 'var(--b)', vals: a }, { name: 'Tienda Nube y local', color: 'var(--g)', vals: b }] })),
+            React.createElement(GBars, { labels: ms.map(lab), series: [{ name: 'CRM (pedidos)', color: 'var(--b)', vals: a }, { name: 'Tienda Nube y local', color: 'var(--g)', vals: b }] })),
         React.createElement(Card, { t: "Por canal" },
-            React.createElement(Donut, { items: [{ name: 'DUX (pedidos)', value: A }, ...by(T, 'ca', r => r.n)] })),
-        React.createElement("p", { className: "text-xs mut" }, "DUX: total de los comprobantes, todo cobrado. Tienda Nube y local: neto de descuentos y sin env\u00EDo. Tienda Nube y local empieza en marzo 2026."));
+            React.createElement(Donut, { items: [{ name: 'CRM (pedidos)', value: A }, ...by(T, 'ca', r => r.n)] })),
+        React.createElement("p", { className: "text-xs mut" }, "CRM (antes DUX): total de los comprobantes, todo cobrado. Tienda Nube y local: neto de descuentos y sin env\u00EDo. Tienda Nube y local empieza en marzo 2026."));
 }
 /* ================= FINANZAS ================= */
 const FZ_DEF = { mkt: 'MDE, NANO MDE, META', dueno: 'RENZO', win: 6, xa: true, mg: '', fj: '' };
 const FZ_L = { MERC: 'Mercadería', FLETES: 'Fletes y transporte', MKT: 'Marketing (agencia y pauta)', DUENO: 'Sueldo del dueño', RETIRO: 'Retiro de ganancias', 'G:SUELDOS': 'Sueldos del personal', 'G:HONORARIOS': 'Honorarios (sin marketing)', 'G:ALQUILERES': 'Alquileres', 'G:SERVICIOS': 'Servicios', 'G:IMPUESTOS': 'Impuestos y cargas', 'G:COMISIONES': 'Comisiones', 'G:MANTENIMIENTO': 'Mantenimiento', 'G:RETIRO EXTRAORDINARIO': 'Otros retiros' };
-const FZ_P = { DUX: 'DUX (pedidos y sillones)', PDV: 'PDV (local)', 'TIENDA NUBE': 'Tienda Nube (web)' };
+const FZ_P = { CRM: 'CRM (pedidos y sillones)', PDV: 'PDV (local)', 'TIENDA NUBE': 'Tienda Nube (web)' };
 const fzM = n => $M(Math.abs(n) >= 999500 && Math.abs(n) < 1e6 ? (n < 0 ? -1e6 : 1e6) : n);
 const fzL = g => FZ_L[g] || cap(String(g).replace(/^G:/, ''));
 const fzList = s => String(s || '').split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
@@ -3398,7 +3502,7 @@ function App() {
         return null;
     } });
     const [kvv, sKvv] = useState(0);
-    useEffect(() => { const h = () => sKvv(x => x + 1); window.addEventListener('ruma-ventas', h); return () => window.removeEventListener('ruma-ventas', h); }, []);
+    useEffect(() => { const h = () => sKvv(x => x + 1); window.addEventListener('ruma-ventas', h); window.addEventListener('ruma-crm', h); return () => { window.removeEventListener('ruma-ventas', h); window.removeEventListener('ruma-crm', h); }; }, []);
     const D = useMemo(() => {
         const ovm = {}, cnt = {};
         PX.items.forEach(o => { ovm[o.key] = o; });
@@ -3423,6 +3527,19 @@ function App() {
         regs.forEach(r => { if (!o[r.t])
             return; if (r.t !== 'ing' && !/^\d{4}-\d{2}-\d{2}$/.test(r.f || ''))
             return; o[r.t].push(regRow(r)); });
+        o.ing = o.ing.map(r => r.p === 'DUX' ? { ...r, p: 'CRM' } : r);
+        /* Ingresos del CRM: solo meses con ventas importadas y sin ingreso CRM cargado a mano. No tocan Caja. */
+        try {
+            const ord = crmGet();
+            if (ord.length) {
+                const rows = crmRows(ord), act = new Set(rows.map(r => ym(r.y, r.mes))), hv = new Set(o.ing.filter(r => r.p === 'CRM').map(r => ym(r.y, r.mes))), agg = {};
+                [...DXR, ...rows].forEach(r => { const k = ym(r.y, r.mes); if (!act.has(k) || hv.has(k))
+                    return; agg[k] = (agg[k] || 0) + (r.tot - (r.env || 0)); });
+                Object.keys(agg).forEach(k => { if (agg[k] > 0)
+                    o.ing.push({ y: Math.floor(+k / 100), mes: +k % 100, p: 'CRM', mt: Math.round(agg[k]), k: +k * 100, der: true }); });
+            }
+        }
+        catch (e) { }
         /* Ingresos calculados desde las ventas importadas (Tienda Nube y local): solo meses/canales sin ingreso cargado a mano. No tocan Caja. */
         try {
             const stv = JSON.parse(__KV.get('ruma_ventas')) || { lines: [] }, mine = stv.lines || [];
@@ -3442,7 +3559,7 @@ function App() {
     const f = a => year === 'all' ? a : a.filter(r => r.y === +year);
     const TABS = [['gen', 'Visión general', 'home'], ['ing', 'Ingresos', 'trend'], ['vta', 'Ventas', 'bag'], ['merc', 'Salida de mercadería', 'box'], ['serv', 'Salida de servicios', 'wrench'], ['caja', 'Caja', 'wallet'], ['agenda', 'Agenda de pagos', 'bell'], ['cal', 'Calendario', 'calendar'], ['prov', 'Comparar proveedores', 'scale'], ['fin', 'Finanzas', 'cash'], ['stock', 'Stock valorizado', 'layers'], ['carga', 'Cargar datos', 'plus']];
     const title = TABS.find(t => t[0] === tab)[1];
-    const HD = { fin: 'Flujo de caja, proyección, estado de resultados, punto de equilibrio y análisis financiero', caja: 'Saldo por cuenta y monto comprometido a pagos', vta: 'Ventas de Tienda Nube y local, y ventas de DUX (pedidos)', agenda: 'Pagos agendados, vencimientos y cuánto se acumula por mes en la tarjeta de crédito', cal: 'Salidas pagadas y agendadas, día por día', stock: 'Cuánto vale la mercadería que tenés y cómo cambia la rentabilidad real del negocio', proy: 'Cómo queda la caja los próximos meses con lo agendado, la tarjeta y los pagos fijos' };
+    const HD = { fin: 'Flujo de caja, proyección, estado de resultados, punto de equilibrio y análisis financiero', caja: 'Saldo por cuenta y monto comprometido a pagos', vta: 'Ventas de Tienda Nube y local, y ventas del CRM (pedidos)', agenda: 'Pagos agendados, vencimientos y cuánto se acumula por mes en la tarjeta de crédito', cal: 'Salidas pagadas y agendadas, día por día', stock: 'Cuánto vale la mercadería que tenés y cómo cambia la rentabilidad real del negocio', proy: 'Cómo queda la caja los próximos meses con lo agendado, la tarjeta y los pagos fijos' };
     const tb = (k, cat, catL, nl) => React.createElement(Table, { key: k + year, rows: D[k], cols: C[k], cat: cat, catL: catL, init: year, onNew: nl && (() => go(k)), newL: nl });
     return React.createElement(CajaCtx.Provider, { value: cv },
         React.createElement("div", { className: "app" },
@@ -3460,7 +3577,7 @@ function App() {
                 React.createElement("header", { className: "flex flex-wrap items-center justify-between gap-3 mb-4" },
                     React.createElement("div", null,
                         React.createElement("h1", { className: "font-bold", style: { fontSize: 26 } }, title),
-                        React.createElement("div", { className: "text-sm mut" }, HD[tab] || 'Ingresos: DUX (planilla de DUX, todo cobrado) más XA, PDV y Tienda Nube de la hoja INGRESOS · egresos de SALIDAS MERCADERIA y SALIDAS SERVICIO · utilidad y flujo sobre monto total')),
+                        React.createElement("div", { className: "text-sm mut" }, HD[tab] || 'Ingresos: CRM (antes DUX, todo cobrado) más XA, PDV y Tienda Nube de la hoja INGRESOS · egresos de SALIDAS MERCADERIA y SALIDAS SERVICIO · utilidad y flujo sobre monto total')),
                     ['gen', 'ing', 'merc', 'serv'].includes(tab) && React.createElement("label", { className: "text-sm flex items-center gap-2" },
                         React.createElement("span", { className: "mut" }, "Per\u00EDodo"),
                         React.createElement("select", { className: "inp", style: { width: 'auto' }, value: year, onChange: e => sYear(e.target.value) },
@@ -3481,7 +3598,7 @@ function App() {
                             React.createElement(HBars, { color: "var(--g)", max: 12, items: by(f(D.ing), 'k', r => r.mt).sort((a, b) => b.name - a.name).map(x => ({ name: lab(Math.floor(+x.name / 100)), value: x.value })) }))),
                     D.ing.some(r => r.der) && React.createElement("p", { className: "text-xs mut" }, "Calculado desde las ventas importadas (neto cobrado, sin env\u00EDo; no se registra en Caja): " + D.ing.filter(r => r.der).sort((x, z) => x.k - z.k).map(r => lab(ym(r.y, r.mes)) + ' ' + r.p + ' ' + $(r.mt)).join(' \u00B7 ') + ". Si carg\u00E1s el ingreso de ese mes a mano, reemplaza al calculado."),
                     tb('ing', 'p', 'Plataforma', 'Nuevo ingreso'),
-                    React.createElement("p", { className: "text-xs mut" }, "DUX sale de la planilla de DUX (suma por fecha de comprobante, todo cobrado). Antes del 17/08/2024 sale de CONSOLIDADO VENTAS. XA, PDV y Tienda Nube vienen de tu hoja INGRESOS.")),
+                    React.createElement("p", { className: "text-xs mut" }, "CRM (antes DUX) sale de la planilla de DUX y de las ventas que importes del CRM (suma por fecha de comprobante, todo cobrado). Antes del 17/08/2024 sale de CONSOLIDADO VENTAS. XA, PDV y Tienda Nube vienen de tu hoja INGRESOS.")),
                 tab === 'merc' && React.createElement("div", { className: "space-y-4" },
                     React.createElement("div", { className: "grid gap-4 lg:grid-cols-2" },
                         React.createElement(Card, { t: "Por proveedor (monto total)" },
