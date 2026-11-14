@@ -1225,7 +1225,7 @@ function Stock({ D, sc }) {
                                 React.createElement("td", null, "Margen bruto"),
                                 React.createElement(V, { v: R.mb, b: true })),
                             React.createElement("tr", null,
-                                React.createElement("td", { style: { paddingLeft: 22 } }, "\u2212 Servicios (incluye tu sueldo)"),
+                                React.createElement("td", { style: { paddingLeft: 22 } }, "\u2212 Servicios y sueldos"),
                                 React.createElement(V, { v: R.serv })),
                             React.createElement("tr", { style: { background: 'var(--gs)' } },
                                 React.createElement("td", null,
@@ -2135,7 +2135,7 @@ function Conciliacion({ D, movs, ctas, kmin, H }) {
 /* ---------- secciones ---------- */
 function Overview({ D, year }) {
     const f = a => year === 'all' ? a : a.filter(r => r.y === +year);
-    const ing = f(D.ing), me = f(D.merc), se = f(D.serv);
+    const ing = f(D.ing), me = f(D.merc), seAll = f(D.serv), isRet = r => /^RETIRO/.test(r.c || ''), se = seAll.filter(r => !isRet(r)), RET = sum(seAll.filter(isRet), r => r.mt);
     const I = sum(ing, r => r.mt), GM = sum(me, r => r.mt), GS = sum(se, r => r.mt), G = GM + GS, U = I - G, pend = sum(me, r => r.rs) + sum(se, r => r.rs);
     const mo = {};
     const add = (k, c, v) => { (mo[k] = mo[k] || { ing: 0, g: 0 })[c] += v; };
@@ -2147,7 +2147,7 @@ function Overview({ D, year }) {
         React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))' } },
             React.createElement(Kpi, { l: "Ingresos totales", v: $M(I), c: "var(--g)", s: $(I) + ' cobrados' }),
             React.createElement(Kpi, { l: "Gastos totales", v: $M(G), c: "var(--o)", s: 'Monto total, esté pago o no. Pendiente de pago: ' + $(pend) }),
-            React.createElement(Kpi, { l: "Utilidad neta", v: $M(U), c: U < 0 ? 'var(--r)' : 'var(--b)', s: (I ? Math.round(U / I * 100) : 0) + '% de los ingresos · sobre monto total, incluye tu sueldo' }),
+            React.createElement(Kpi, { l: "Utilidad neta", v: $M(U), c: U < 0 ? 'var(--r)' : 'var(--b)', s: (I ? Math.round(U / I * 100) : 0) + '% de los ingresos · después de sueldos y gastos' + (RET > 0 ? ', antes de retiros (retiros ' + $M(RET) + ')' : '') }),
             React.createElement(Kpi, { l: "Mercader\u00EDa vs. servicios", v: G ? Math.round(GM / G * 100) + ' / ' + Math.round(GS / G * 100) + ' %' : '-', c: "var(--b)", s: 'Mercadería ' + $M(GM) + ' · Servicios ' + $M(GS) })),
         React.createElement(Card, { t: "Ingresos vs. gastos por mes" },
             React.createElement(Bars, { data: ser }),
@@ -2756,7 +2756,7 @@ const crmRows = orders => {
 };
 const parseCRM = text => {
     const t = text.replace(/^﻿/, ''), first = t.split('\n')[0], sep = (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ';' : ',', R = parseCSV(t, sep), hd = (R[0] || []).map(x => String(x).trim()), ix = n => hd.indexOf(n);
-    const I = { id: ix('Número de orden'), f: ix('Fecha'), est: ix('Estado de la orden'), sub: ix('Subtotal de productos'), des: ix('Descuento'), env: ix('Costo de envío'), tot: ix('Total'), ca: ix('Canal'), mp: ix('Medio de pago'), fp: ix('Forma de pago'), cu: ix('Cantidad de cuotas'), cl: ix('Nombre del comprador'), v: ix('Vendedor'), p: ix('Nombre del producto'), pr: ix('Precio del producto'), q: ix('Cantidad del producto'), sku: ix('SKU') };
+    const I = { id: ix('Número de orden'), f: ix('Fecha'), est: ix('Estado de la orden'), sub: ix('Subtotal de productos'), des: ix('Descuento'), env: ix('Costo de envío'), tot: ix('Total'), ca: ix('Canal'), mp: ix('Medio de pago'), fp: ix('Forma de pago'), cu: ix('Cantidad de cuotas'), cl: ix('Nombre del comprador'), v: ix('Vendedor'), p: ix('Nombre del producto'), pr: ix('Precio del producto'), q: ix('Cantidad del producto'), sku: ix('SKU'), tipo: ix('Tipo de producto'), mod: ix('Modelo'), med: ix('Medidas'), tela: ix('Tela'), mts: ix('Metros de tela'), cob: ix('Cobrado real'), ctal: ix('Costo taller'), ctel: ix('Costo tela'), cfle: ix('Costo flete'), cotr: ix('Costos otros'), ent: ix('Entrega real') }, g = (r, k) => k < 0 ? '' : r[k], hasC = I.ctal >= 0 && I.cob >= 0;
     if (I.id < 0 || I.f < 0 || I.tot < 0)
         return { err: 'No reconozco las columnas del archivo. Tiene que ser la exportación de ventas del CRM (con Número de orden, Fecha y Total).', orders: [], skip: {} };
     const orders = [], skip = {}, dbg = { filas: Math.max(0, R.length - 1), conFecha: 0, f1: '', e1: '' };
@@ -2783,10 +2783,12 @@ const parseCRM = text => {
             }
             const sub = num(r[I.sub]), des = num(r[I.des]), env = num(r[I.env]), tot = num(r[I.tot]) || (sub - des + env);
             o = { id, f: m[3] + '-' + m[2] + '-' + m[1], t: m[4] ? m[4] + ':' + m[5] : '12:00', est, sub, des, env, tot, ca: String(r[I.ca] || ''), mp: String(r[I.mp] || ''), fp: String(r[I.fp] || ''), cu: num(r[I.cu]), cl: String(r[I.cl] || '').trim().toUpperCase() || 'SIN NOMBRE', v: String(r[I.v] || '').trim(), it: [] };
+            if (hasC)
+                o.ct = { cob: num(g(r, I.cob)), ta: num(g(r, I.ctal)), te: num(g(r, I.ctel)), fl: num(g(r, I.cfle)), ot: num(g(r, I.cotr)), ent: String(g(r, I.ent) || '') };
             orders.push(o);
         }
         if (o && o.id === id && r[I.p])
-            o.it.push({ p: String(r[I.p]).slice(0, 90), sku: String(r[I.sku] || ''), q: num(r[I.q]), pr: num(r[I.pr]) });
+            o.it.push({ p: String(r[I.p]).slice(0, 90), sku: String(r[I.sku] || ''), q: num(r[I.q]), pr: num(r[I.pr]), tp: String(g(r, I.tipo) || ''), md: String(g(r, I.mod) || '').trim(), me: String(g(r, I.med) || '').trim(), te: String(g(r, I.tela) || '').trim(), mt: num(g(r, I.mts)) });
     });
     return { orders, skip, dbg };
 };
@@ -3570,6 +3572,82 @@ function CierreSemanal({ D, regs, rc, CT, CJ, SC, CF, go }) {
         React.createElement(FzTip, null, "Las ventas de los últimos 7 días salen de las órdenes del CRM y de lo importado de Tienda Nube y local, por fecha de la orden (" + (lastV ? 'última venta importada: ' + dmy2(lastV) : 'sin ventas importadas') + "). El punto de equilibrio, la utilidad y los días de saldo usan las mismas reglas que Finanzas."));
 }
 
+/* ================= MARGEN POR SILLÓN (datos del CRM) ================= */
+const SmEsSil = i => /sill/i.test(i.tp || '');
+const SmEst = {
+    'OK': ['var(--gs)', 'var(--g)'],
+    'Sin entregar': ['var(--bs)', 'var(--b)'],
+    'Saldo pendiente': ['var(--os)', 'var(--o)'],
+    'Faltan costos': ['var(--os)', 'var(--o)'],
+    'Mixto': ['var(--bg)', 'var(--mut)']
+};
+function SillMargen({ go }) {
+    const [kv, sKv] = useState(0);
+    useEffect(() => { const h = () => sKv(x => x + 1); window.addEventListener('ruma-crm', h); return () => window.removeEventListener('ruma-crm', h); }, []);
+    const all = useMemo(() => crmGet(), [kv]);
+    const conC = useMemo(() => all.filter(o => o.ct), [all]);
+    const rows = useMemo(() => conC.filter(o => (o.it || []).some(SmEsSil)).map(o => {
+        const sil = o.it.filter(SmEsSil), mixto = sil.length < o.it.length, ct = o.ct, costo = ct.ta + ct.te + ct.fl + ct.ot;
+        const ent = /entregad/i.test(o.est), pend = o.tot - ct.cob > 1;
+        const est = mixto ? 'Mixto' : !ent ? 'Sin entregar' : pend ? 'Saldo pendiente' : (ct.ta <= 0 || ct.te <= 0) ? 'Faltan costos' : 'OK';
+        const gan = ct.cob - costo, n = (+o.id || 0) - 9000000;
+        return { id: o.id, nro: n > 0 && n < 100000 ? 'P-' + String(n).padStart(4, '0') : o.id, f: o.f, cl: o.cl, mod: sil.map(i => i.md || 'Sin modelo').join(' + ').toUpperCase(), med: sil.map(i => i.me).filter(Boolean).join(' + '), cob: ct.cob, tot: o.tot, ta: ct.ta, te: ct.te, fl: ct.fl, ot: ct.ot, costo, gan, mg: ct.cob > 0 ? gan / ct.cob : null, est };
+    }).sort((a, b) => b.f < a.f ? -1 : b.f > a.f ? 1 : 0), [conC]);
+    const ok = rows.filter(r => r.est === 'OK');
+    const T = { n: ok.length, cob: sum(ok, r => r.cob), gan: sum(ok, r => r.gan) }, mgT = T.cob > 0 ? T.gan / T.cob : null;
+    const byM = useMemo(() => { const m = {}; ok.forEach(r => { const x = m[r.mod] = m[r.mod] || { mod: r.mod, n: 0, cob: 0, costo: 0 }; x.n++; x.cob += r.cob; x.costo += r.costo; }); return Object.values(m).map(x => ({ ...x, gan: x.cob - x.costo, mg: x.cob > 0 ? (x.cob - x.costo) / x.cob : null })).sort((a, b) => b.n - a.n || b.gan - a.gan); }, [rows]);
+    const excl = rows.length - ok.length;
+    const chip = e => React.createElement("span", { style: { fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: (SmEst[e] || SmEst.Mixto)[0], color: (SmEst[e] || SmEst.Mixto)[1], whiteSpace: 'nowrap' } }, e);
+    if (!all.length)
+        return React.createElement(Card, { t: "Margen por sillón" },
+            React.createElement("p", { className: "text-sm" }, "Todavía no importaste ventas del CRM. Hacelo desde Ventas y acá aparece el margen real de cada sillón."),
+            React.createElement("button", { className: "btn mt-3", onClick: () => go('vta') }, "Ir a Ventas"));
+    if (!conC.length)
+        return React.createElement(Card, { t: "Margen por sillón" },
+            React.createElement("p", { className: "text-sm" }, "Las ventas que importaste son de la versión anterior del CRM y no traen costos. En el CRM: Exportar ventas → \"Para el tablero de control (CSV)\" (la versión nueva incluye costos y lo cobrado de verdad) y volvé a importarlo en Ventas. No se duplica nada."),
+            React.createElement("button", { className: "btn mt-3", onClick: () => go('vta') }, "Ir a Ventas"));
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))' } },
+            React.createElement(Kpi, { l: "Sillones con margen medido", v: String(T.n), c: "var(--b)", s: excl ? excl + ' más no entran (ver estado abajo)' : 'Todos los sillones del CRM' }),
+            React.createElement(Kpi, { l: "Cobrado", v: $M(T.cob), c: "var(--g)", s: 'Lo que entró de verdad, no el precio de lista' }),
+            React.createElement(Kpi, { l: "Ganancia", v: $M(T.gan), c: T.gan < 0 ? 'var(--r)' : 'var(--g)', s: 'Cobrado menos taller, tela, flete y otros costos' }),
+            React.createElement(Kpi, { l: "Margen sobre lo cobrado", v: mgT == null ? '–' : PCT(mgT), c: "var(--b)", s: 'Es sobre el precio de venta, no sobre el costo' })),
+        byM.length > 0 && React.createElement(Card, { t: "Por modelo" },
+            React.createElement("div", { className: "overflow-x-auto" },
+                React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
+                    React.createElement("thead", null, React.createElement("tr", null, ['Modelo', 'Unidades', 'Cobrado', 'Costo', 'Ganancia', 'Margen'].map((h, i) => React.createElement("th", { key: h, className: i ? 'text-right' : '' }, h)))),
+                    React.createElement("tbody", null, byM.map(x => React.createElement("tr", { key: x.mod },
+                        React.createElement("td", null, React.createElement("b", null, x.mod)),
+                        React.createElement("td", { className: "num text-right" }, x.n),
+                        React.createElement("td", { className: "num text-right" }, $(x.cob)),
+                        React.createElement("td", { className: "num text-right" }, $(x.costo)),
+                        React.createElement("td", { className: "num text-right", style: { color: x.gan < 0 ? 'var(--r)' : undefined } }, $(x.gan)),
+                        React.createElement("td", { className: "num text-right" }, x.mg == null ? '–' : PCT(x.mg)))))))),
+        React.createElement(Card, { t: "Cada pedido con sillón" },
+            React.createElement("div", { className: "overflow-x-auto" },
+                React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
+                    React.createElement("thead", null, React.createElement("tr", null, ['Pedido', 'Estado', 'Fecha', 'Cliente', 'Modelo', 'Medidas', 'Cobrado', 'Taller', 'Tela', 'Flete', 'Otros', 'Ganancia', 'Margen'].map((h, i) => React.createElement("th", { key: h, className: i >= 6 ? 'text-right' : '' }, h)))),
+                    React.createElement("tbody", null, rows.map(r => React.createElement("tr", { key: r.id },
+                        React.createElement("td", null, r.nro),
+                        React.createElement("td", null, chip(r.est)),
+                        React.createElement("td", { className: "num" }, dmy(r.f)),
+                        React.createElement("td", null, r.cl),
+                        React.createElement("td", null, r.mod),
+                        React.createElement("td", null, r.med),
+                        React.createElement("td", { className: "num text-right" }, $(r.cob)),
+                        React.createElement("td", { className: "num text-right" }, r.ta ? $(r.ta) : '–'),
+                        React.createElement("td", { className: "num text-right" }, r.te ? $(r.te) : '–'),
+                        React.createElement("td", { className: "num text-right" }, r.fl ? $(r.fl) : '–'),
+                        React.createElement("td", { className: "num text-right" }, r.ot ? $(r.ot) : '–'),
+                        React.createElement("td", { className: "num text-right", style: { color: r.gan < 0 ? 'var(--r)' : undefined } }, $(r.gan)),
+                        React.createElement("td", { className: "num text-right" }, r.mg == null ? '–' : PCT(r.mg))))))),
+            React.createElement("ul", { className: "text-xs mut mt-3 space-y-1", style: { paddingLeft: 16, listStyle: 'disc' } },
+                React.createElement("li", null, "Solo cuentan los sillones entregados, pagados por completo y con costo de taller y de tela cargados en el CRM. Los demás figuran con su estado y no entran en los promedios."),
+                React.createElement("li", null, "\"Mixto\" es un pedido que además del sillón lleva otros productos: los costos están juntos y no se pueden separar."),
+                React.createElement("li", null, "Los costos salen de lo que cargás en cada pedido del CRM. Si falta la tela o el flete, el margen sale más alto de lo real."),
+                React.createElement("li", null, "Para actualizar, volvé a exportar desde el CRM e importá de nuevo en Ventas."))));
+}
+
 function App() {
     const [tab, sTab] = useState('gen'), [year, sYear] = useState('2026'), [ft, sFt] = useState('ing');
     const R = useCol('registros', 'ruma_reg'), RC = useCol('recurrentes', 'ruma_rec'), SC = useCol('stock', 'ruma_stock'), CT = useCol('cuentas', 'ruma_cta'), CJ = useCol('caja', 'ruma_caja'), PX = useCol('pagosx', 'ruma_px'), CF = useCol('config', 'ruma_cfg');
@@ -3680,9 +3758,9 @@ function App() {
     }, [regs, PX.items, kvv]);
     const go = t => { sFt(t); sTab('carga'); };
     const f = a => year === 'all' ? a : a.filter(r => r.y === +year);
-    const TABS = [['gen', 'Visión general', 'home'], ['cie', 'Cierre semanal', 'check'], ['ing', 'Ingresos', 'trend'], ['vta', 'Ventas', 'bag'], ['merc', 'Salida de mercadería', 'box'], ['serv', 'Salida de servicios', 'wrench'], ['caja', 'Caja', 'wallet'], ['agenda', 'Agenda de pagos', 'bell'], ['cal', 'Calendario', 'calendar'], ['prov', 'Comparar proveedores', 'scale'], ['fin', 'Finanzas', 'cash'], ['stock', 'Stock valorizado', 'layers'], ['carga', 'Cargar datos', 'plus']];
+    const TABS = [['gen', 'Visión general', 'home'], ['cie', 'Cierre semanal', 'check'], ['sil', 'Margen sillones', 'chair'], ['ing', 'Ingresos', 'trend'], ['vta', 'Ventas', 'bag'], ['merc', 'Salida de mercadería', 'box'], ['serv', 'Salida de servicios', 'wrench'], ['caja', 'Caja', 'wallet'], ['agenda', 'Agenda de pagos', 'bell'], ['cal', 'Calendario', 'calendar'], ['prov', 'Comparar proveedores', 'scale'], ['fin', 'Finanzas', 'cash'], ['stock', 'Stock valorizado', 'layers'], ['carga', 'Cargar datos', 'plus']];
     const title = TABS.find(t => t[0] === tab)[1];
-    const HD = { cie: 'Qué mirar cada lunes: avance del mes, caja, pagos y alertas', fin: 'Flujo de caja, proyección, estado de resultados, punto de equilibrio y análisis financiero', caja: 'Saldo por cuenta y monto comprometido a pagos', vta: 'Ventas de Tienda Nube y local, y ventas del CRM (pedidos)', agenda: 'Pagos agendados, vencimientos y cuánto se acumula por mes en la tarjeta de crédito', cal: 'Salidas pagadas y agendadas, día por día', stock: 'Cuánto vale la mercadería que tenés y cómo cambia la rentabilidad real del negocio', proy: 'Cómo queda la caja los próximos meses con lo agendado, la tarjeta y los pagos fijos' };
+    const HD = { sil: 'Ganancia real de cada sillón vendido, con los costos y lo cobrado que cargás en el CRM', cie: 'Qué mirar cada lunes: avance del mes, caja, pagos y alertas', fin: 'Flujo de caja, proyección, estado de resultados, punto de equilibrio y análisis financiero', caja: 'Saldo por cuenta y monto comprometido a pagos', vta: 'Ventas de Tienda Nube y local, y ventas del CRM (pedidos)', agenda: 'Pagos agendados, vencimientos y cuánto se acumula por mes en la tarjeta de crédito', cal: 'Salidas pagadas y agendadas, día por día', stock: 'Cuánto vale la mercadería que tenés y cómo cambia la rentabilidad real del negocio', proy: 'Cómo queda la caja los próximos meses con lo agendado, la tarjeta y los pagos fijos' };
     const tb = (k, cat, catL, nl) => React.createElement(Table, { key: k + year, rows: D[k], cols: C[k], cat: cat, catL: catL, init: year, onNew: nl && (() => go(k)), newL: nl });
     return React.createElement(CajaCtx.Provider, { value: cv },
         React.createElement("div", { className: "app" },
@@ -3739,6 +3817,7 @@ function App() {
                 tab === 'vta' && React.createElement(VentasTab, { D: D }),
                 tab === 'prov' && React.createElement(ProvComp, { D: D }),
                 tab === 'cie' && React.createElement(CierreSemanal, { D: D, regs: regs, rc: RC, CT: CT, CJ: CJ, SC: SC, CF: CF, go: t => sTab(t) }),
+                tab === 'sil' && React.createElement(SillMargen, { go: t => sTab(t) }),
                 tab === 'fin' && React.createElement(Finanzas, { D: D, regs: regs, rc: RC, CT: CT, CJ: CJ, SC: SC, CF: CF }),
                 tab === 'caja' && React.createElement(Caja, { D: D, regs: regs, CT: CT, CJ: CJ, SC: SC, go: sTab }),
                 tab === 'agenda' && React.createElement(Agenda, { D: D, regs: regs, onAdd: add, onUpd: upd, onDel: del, dbs: dbs, rc: RC, onPayX: updX, onUndoX: undoX, onAnulX: anulX, onRestX: restX, nAnul: PX.items.filter(o => o.anul).length }),
