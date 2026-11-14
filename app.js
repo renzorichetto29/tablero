@@ -3462,6 +3462,114 @@ function Finanzas({ D, regs, rc, CT, CJ, SC, CF }) {
         sub === 'an' && (ms.length ? React.createElement(FzAnalisis, common) : React.createElement("div", { className: "card p-4 mut" }, "No hay datos en el per\u00EDodo elegido.")));
 }
 
+/* ================= CIERRE SEMANAL ================= */
+function CzBar({ v, max, c }) {
+    const p = max > 0 ? Math.max(0, Math.min(100, v / max * 100)) : 0;
+    return React.createElement("div", { style: { height: 10, borderRadius: 6, background: 'var(--line)', overflow: 'hidden' } },
+        React.createElement("div", { style: { width: p + '%', height: '100%', background: c || 'var(--g)' } }));
+}
+function CierreSemanal({ D, regs, rc, CT, CJ, SC, CF, go }) {
+    const H = hoy(), HK = ymOf(H), cf = useFzCfg(CF), [kv, sKv] = useState(0);
+    useEffect(() => { const h = () => sKv(x => x + 1); window.addEventListener('ruma-ventas', h); window.addEventListener('ruma-crm', h); return () => { window.removeEventListener('ruma-ventas', h); window.removeEventListener('ruma-crm', h); }; }, []);
+    const model = useMemo(() => fzModel(D, cf.v, 'pg'), [D, cf.v.mkt]);
+    const be = useMemo(() => fzBE(model, cf.v, HK), [model, cf.v.win, cf.v.xa, cf.v.mg, cf.v.fj]);
+    const M = model.M, CH = fzCajaHoy(CT, CJ, SC);
+    const act = CT.items.filter(x => x.k === 'cta' && x.act !== false);
+    const cp = useMemo(() => comprometido(regs, CJ.items, act, H, D), [regs, CJ.items, CT.items, D]);
+    const libre = CH.total - cp.total, dia = be.fj / 30;
+    const d0 = new Date(H + 'T00:00:00'), nd = new Date(d0.getFullYear(), d0.getMonth() + 1, 0).getDate(), dn = d0.getDate();
+    const cur = M[HK] || { ventas: 0, bruto: 0, neta: 0 }, ven = cur.ventas, pe = be.pe, falta = pe == null ? null : Math.max(0, pe - ven), ritmo = dn > 0 ? ven / dn * nd : 0;
+    const prevY = M[HK - 100], closed = Object.keys(M).map(Number).filter(k => k < HK && M[k].ventas > 0).sort((a, b) => a - b), lk = closed[closed.length - 1], lm = lk ? M[lk] : null;
+    /* ventas con fecha: pedidos del CRM + local y web importados */
+    const det = useMemo(() => {
+        const o = [];
+        try {
+            [...DXR, ...crmRows(crmGet())].forEach(r => o.push({ f: r.f, m: r.tot - (r.env || 0), s: 'CRM' }));
+        }
+        catch (e) { }
+        try {
+            let st = { lines: [] };
+            try {
+                st = JSON.parse(__KV.get('ruma_ventas')) || st;
+            }
+            catch (e) { }
+            const ids = new Set((st.lines || []).map(l => l.id));
+            [...VD.lines.filter(l => !ids.has(l.id)), ...(st.lines || [])].forEach(l => o.push({ f: l.f, m: +l.n || 0, s: 'Local y web' }));
+        }
+        catch (e) { }
+        return o;
+    }, [kv]);
+    const addD = (f, n) => { const d = new Date(f + 'T00:00:00'); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+    const w0 = addD(H, -6), w1 = addD(H, -13), w2 = addD(H, -7);
+    const s7 = sum(det.filter(r => r.f >= w0 && r.f <= H), r => r.m), s7p = sum(det.filter(r => r.f >= w1 && r.f <= w2), r => r.m);
+    const lastV = det.reduce((m, r) => r.f > m ? r.f : m, ''), lastAge = lastV ? -dd(lastV, H) : null;
+    const pr = useMemo(() => pendRows(regs).map(r => ({ r, d: dueOf(r), a: remOf(r) })).filter(x => x.a > 0.5), [regs]);
+    const venc = pr.filter(x => x.d && dd(x.d, H) < 0), prox = pr.filter(x => x.d && dd(x.d, H) >= 0 && dd(x.d, H) <= 7), sinF = pr.filter(x => !x.d);
+    const lst = [...venc, ...prox].sort((a, b) => a.d < b.d ? -1 : 1).slice(0, 8);
+    const dmy2 = f => f.slice(8, 10) + '/' + f.slice(5, 7);
+    const al = [];
+    if (!ven)
+        al.push({ b: 1, t: 'El mes todavía no tiene ingresos cargados ni ventas importadas: el avance contra el punto de equilibrio sale en cero.' });
+    if (lastAge != null && lastAge > 7)
+        al.push({ b: 1, t: 'La última venta importada es del ' + dmy2(lastV) + ' (hace ' + lastAge + ' días). Importar el CSV del CRM y de Tienda Nube.', go: 'vta' });
+    if (!lastV)
+        al.push({ b: 1, t: 'No hay ventas con fecha importadas.', go: 'vta' });
+    if (venc.length)
+        al.push({ b: 1, t: venc.length + (venc.length === 1 ? ' pago vencido' : ' pagos vencidos') + ' por ' + $(sum(venc, x => x.a)) + '.', go: 'agenda' });
+    if (CH.has && libre < 0)
+        al.push({ b: 1, t: 'El saldo libre es negativo (' + $(libre) + '): lo comprometido supera el saldo de Caja.', go: 'caja' });
+    if (!CH.has)
+        al.push({ b: 1, t: 'No hay cuentas cargadas en Caja: no se puede calcular el saldo ni los días que cubre.', go: 'caja' });
+    if (pe != null && ven > 0 && ritmo < pe)
+        al.push({ b: 0, t: 'Al ritmo actual el mes cerraría en ' + fzM(ritmo) + ', por debajo del punto de equilibrio (' + fzM(pe) + ').' });
+    if (sinF.length)
+        al.push({ b: 0, t: sinF.length + ' pagos pendientes sin fecha de vencimiento (' + $(sum(sinF, x => x.a)) + ').', go: 'agenda' });
+    const delta = (a, b) => b > 0 && a > 0 ? (a / b - 1) : NaN;
+    const dp = v => isFinite(v) ? (v >= 0 ? '+' : '') + (v * 100).toFixed(0) + ' %' : '–';
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", { className: "text-sm mut" }, 'Hoy es ' + H.slice(8, 10) + '/' + H.slice(5, 7) + '/' + H.slice(0, 4) + ' · día ' + dn + ' de ' + nd + ' de ' + lab(HK)),
+        React.createElement(Card, { t: "Alertas de la semana" },
+            al.length ? React.createElement("ul", { className: "space-y-2 text-sm" }, al.map((x, i) => React.createElement("li", { key: i, className: "flex flex-wrap gap-2 items-center" },
+                React.createElement("span", { className: "bd", style: { background: x.b ? 'var(--rs)' : 'var(--os)', color: x.b ? 'var(--r)' : 'var(--o)' } }, x.b ? 'Atender' : 'Mirar'),
+                React.createElement("span", null, x.t),
+                x.go && go && React.createElement("button", { className: "btn", onClick: () => go(x.go) }, "Ir")))) : React.createElement("div", { className: "text-sm", style: { color: 'var(--g)' } }, "Sin alertas: ventas al día, sin pagos vencidos y con saldo libre positivo.")),
+        React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))' } },
+            React.createElement(Kpi, { l: "Ventas de " + lab(HK), v: fzM(ven), c: "var(--g)", s: 'Mes en curso, sin XA' }),
+            React.createElement(Kpi, { l: "Punto de equilibrio", v: pe == null ? '–' : fzM(pe), c: "var(--b)", s: pe == null ? 'Sin datos para calcularlo' : falta > 0 ? 'Faltan ' + fzM(falta) + ' para cubrirlo' : 'Ya lo cubriste este mes' }),
+            React.createElement(Kpi, { l: "Ritmo del mes", v: fzM(ritmo), c: pe != null && ritmo < pe ? 'var(--o)' : 'var(--g)', s: 'Si sigue igual hasta fin de mes (proyección lineal)' }),
+            React.createElement(Kpi, { l: "Ventas últimos 7 días", v: fzM(s7), c: "var(--b)", s: '7 días anteriores: ' + fzM(s7p) + (s7p > 0 ? ' (' + dp(delta(s7, s7p)) + ')' : '') })),
+        React.createElement(Card, { t: "Avance del mes contra el punto de equilibrio" },
+            React.createElement(CzBar, { v: ven, max: pe || 0, c: pe != null && ven >= pe ? 'var(--g)' : 'var(--o)' }),
+            React.createElement("div", { className: "flex justify-between text-xs mut mt-1" }, React.createElement("span", null, fzM(ven)), React.createElement("span", null, pe == null ? '' : (pe > 0 ? Math.round(ven / pe * 100) : 0) + ' % de ' + fzM(pe))),
+            React.createElement("div", { className: "overflow-x-auto mt-3" },
+                React.createElement("table", { className: "w-full", style: { borderCollapse: 'collapse' } },
+                    React.createElement("thead", null, React.createElement("tr", null, ['Comparación', 'Ventas', 'Este mes contra eso'].map((h, i) => React.createElement("th", { key: h, className: i ? 'text-right' : '' }, h)))),
+                    React.createElement("tbody", null,
+                        React.createElement("tr", null, React.createElement("td", null, lab(HK) + ' (parcial)'), React.createElement(FzTd, { v: ven }), React.createElement("td", { className: "text-right mut" }, '–')),
+                        prevY && React.createElement("tr", null, React.createElement("td", null, 'Mismo mes del año pasado (' + lab(HK - 100) + ')'), React.createElement(FzTd, { v: prevY.ventas }), React.createElement("td", { className: "text-right" }, dp(delta(ven, prevY.ventas)))),
+                        be.cl.length > 0 && React.createElement("tr", null, React.createElement("td", null, 'Promedio de los últimos ' + be.cl.length + ' meses cerrados'), React.createElement(FzTd, { v: be.avg }), React.createElement("td", { className: "text-right" }, dp(delta(ven, be.avg)))),
+                        lm && React.createElement("tr", null, React.createElement("td", null, 'Último mes cerrado (' + lab(lk) + ')'), React.createElement(FzTd, { v: lm.ventas }), React.createElement("td", { className: "text-right" }, dp(delta(ven, lm.ventas))))))),
+            React.createElement(FzTip, null, "Un mes en curso siempre se ve bajo contra los cerrados. Para mirar el avance real, compará con el ritmo. Si todavía no cargaste los ingresos del mes, solo cuentan las ventas importadas.")),
+        lm && React.createElement(Card, { t: 'Utilidad del último mes cerrado (' + lab(lk) + ')' },
+            React.createElement("div", { className: "grid gap-3", style: { gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' } },
+                React.createElement(Kpi, { l: "Ventas", v: fzM(lm.ventas), c: "var(--g)" }),
+                React.createElement(Kpi, { l: "Utilidad bruta", v: fzM(lm.bruto), c: "var(--b)", s: fzPct(lm.ventas > 0 ? lm.bruto / lm.ventas : NaN) + ' de las ventas' }),
+                React.createElement(Kpi, { l: "Utilidad neta", v: fzM(lm.neta), c: lm.neta < 0 ? 'var(--r)' : 'var(--g)', s: 'Rentabilidad ' + fzPct(lm.ventas > 0 ? lm.neta / lm.ventas : NaN) }))),
+        React.createElement("div", { className: "grid gap-4 grid-cols-1 lg:grid-cols-2" },
+            React.createElement(Card, { t: "Caja hoy" },
+                CH.has ? React.createElement("div", { className: "space-y-2 text-sm" },
+                    [['Saldo en Caja', CH.total, 'var(--b)'], ['Comprometido a pagos', cp.total, 'var(--o)'], ['Saldo libre', libre, libre < 0 ? 'var(--r)' : 'var(--g)']].map(([l, v, c]) => React.createElement("div", { key: l, className: "flex justify-between" }, React.createElement("span", null, l), React.createElement("b", { style: { color: c } }, $(v)))),
+                    React.createElement("div", { className: "flex justify-between mut" }, React.createElement("span", null, "Días que cubre el saldo libre (solo gastos fijos)"), React.createElement("b", null, dia > 0 ? Math.floor(Math.max(0, libre) / dia) + ' días' : '–'))) : React.createElement("div", { className: "text-sm mut" }, "Todavía no hay cuentas cargadas en Caja.")),
+            React.createElement(Card, { t: "Pagos a atender" },
+                lst.length ? React.createElement("div", { className: "space-y-1 text-sm" }, lst.map((x, i) => React.createElement("div", { key: i, className: "flex justify-between gap-2" },
+                    React.createElement("span", null, dmy2(x.d) + ' · ' + (x.r.p || '') + (dd(x.d, H) < 0 ? ' (vencido)' : '')),
+                    React.createElement("b", { style: { color: dd(x.d, H) < 0 ? 'var(--r)' : undefined } }, $(x.a)))),
+                    (venc.length + prox.length) > lst.length && React.createElement("div", { className: "text-xs mut" }, 'Y ' + (venc.length + prox.length - lst.length) + ' más en la Agenda.'))
+                    : React.createElement("div", { className: "text-sm mut" }, "No hay pagos vencidos ni con vencimiento en los próximos 7 días."),
+                React.createElement("div", { className: "text-xs mut mt-2" }, 'Vencidos: ' + venc.length + ' (' + $(sum(venc, x => x.a)) + ') · Próximos 7 días: ' + prox.length + ' (' + $(sum(prox, x => x.a)) + ')'))),
+        React.createElement(FzTip, null, "Las ventas de los últimos 7 días salen de las órdenes del CRM y de lo importado de Tienda Nube y local, por fecha de la orden (" + (lastV ? 'última venta importada: ' + dmy2(lastV) : 'sin ventas importadas') + "). El punto de equilibrio, la utilidad y los días de saldo usan las mismas reglas que Finanzas."));
+}
+
 function App() {
     const [tab, sTab] = useState('gen'), [year, sYear] = useState('2026'), [ft, sFt] = useState('ing');
     const R = useCol('registros', 'ruma_reg'), RC = useCol('recurrentes', 'ruma_rec'), SC = useCol('stock', 'ruma_stock'), CT = useCol('cuentas', 'ruma_cta'), CJ = useCol('caja', 'ruma_caja'), PX = useCol('pagosx', 'ruma_px'), CF = useCol('config', 'ruma_cfg');
@@ -3572,9 +3680,9 @@ function App() {
     }, [regs, PX.items, kvv]);
     const go = t => { sFt(t); sTab('carga'); };
     const f = a => year === 'all' ? a : a.filter(r => r.y === +year);
-    const TABS = [['gen', 'Visión general', 'home'], ['ing', 'Ingresos', 'trend'], ['vta', 'Ventas', 'bag'], ['merc', 'Salida de mercadería', 'box'], ['serv', 'Salida de servicios', 'wrench'], ['caja', 'Caja', 'wallet'], ['agenda', 'Agenda de pagos', 'bell'], ['cal', 'Calendario', 'calendar'], ['prov', 'Comparar proveedores', 'scale'], ['fin', 'Finanzas', 'cash'], ['stock', 'Stock valorizado', 'layers'], ['carga', 'Cargar datos', 'plus']];
+    const TABS = [['gen', 'Visión general', 'home'], ['cie', 'Cierre semanal', 'check'], ['ing', 'Ingresos', 'trend'], ['vta', 'Ventas', 'bag'], ['merc', 'Salida de mercadería', 'box'], ['serv', 'Salida de servicios', 'wrench'], ['caja', 'Caja', 'wallet'], ['agenda', 'Agenda de pagos', 'bell'], ['cal', 'Calendario', 'calendar'], ['prov', 'Comparar proveedores', 'scale'], ['fin', 'Finanzas', 'cash'], ['stock', 'Stock valorizado', 'layers'], ['carga', 'Cargar datos', 'plus']];
     const title = TABS.find(t => t[0] === tab)[1];
-    const HD = { fin: 'Flujo de caja, proyección, estado de resultados, punto de equilibrio y análisis financiero', caja: 'Saldo por cuenta y monto comprometido a pagos', vta: 'Ventas de Tienda Nube y local, y ventas del CRM (pedidos)', agenda: 'Pagos agendados, vencimientos y cuánto se acumula por mes en la tarjeta de crédito', cal: 'Salidas pagadas y agendadas, día por día', stock: 'Cuánto vale la mercadería que tenés y cómo cambia la rentabilidad real del negocio', proy: 'Cómo queda la caja los próximos meses con lo agendado, la tarjeta y los pagos fijos' };
+    const HD = { cie: 'Qué mirar cada lunes: avance del mes, caja, pagos y alertas', fin: 'Flujo de caja, proyección, estado de resultados, punto de equilibrio y análisis financiero', caja: 'Saldo por cuenta y monto comprometido a pagos', vta: 'Ventas de Tienda Nube y local, y ventas del CRM (pedidos)', agenda: 'Pagos agendados, vencimientos y cuánto se acumula por mes en la tarjeta de crédito', cal: 'Salidas pagadas y agendadas, día por día', stock: 'Cuánto vale la mercadería que tenés y cómo cambia la rentabilidad real del negocio', proy: 'Cómo queda la caja los próximos meses con lo agendado, la tarjeta y los pagos fijos' };
     const tb = (k, cat, catL, nl) => React.createElement(Table, { key: k + year, rows: D[k], cols: C[k], cat: cat, catL: catL, init: year, onNew: nl && (() => go(k)), newL: nl });
     return React.createElement(CajaCtx.Provider, { value: cv },
         React.createElement("div", { className: "app" },
@@ -3630,6 +3738,7 @@ function App() {
                     tb('serv', 'c', 'Concepto', 'Nueva salida')),
                 tab === 'vta' && React.createElement(VentasTab, { D: D }),
                 tab === 'prov' && React.createElement(ProvComp, { D: D }),
+                tab === 'cie' && React.createElement(CierreSemanal, { D: D, regs: regs, rc: RC, CT: CT, CJ: CJ, SC: SC, CF: CF, go: t => sTab(t) }),
                 tab === 'fin' && React.createElement(Finanzas, { D: D, regs: regs, rc: RC, CT: CT, CJ: CJ, SC: SC, CF: CF }),
                 tab === 'caja' && React.createElement(Caja, { D: D, regs: regs, CT: CT, CJ: CJ, SC: SC, go: sTab }),
                 tab === 'agenda' && React.createElement(Agenda, { D: D, regs: regs, onAdd: add, onUpd: upd, onDel: del, dbs: dbs, rc: RC, onPayX: updX, onUndoX: undoX, onAnulX: anulX, onRestX: restX, nAnul: PX.items.filter(o => o.anul).length }),
